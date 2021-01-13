@@ -1,9 +1,9 @@
 import time
+import os
 import dateparser
 import uuid
 from bs4 import BeautifulSoup
 from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 from datetime import datetime, timedelta
 
@@ -25,23 +25,32 @@ class ParsedInfo:
         self.unique_id = uuid.uuid1().hex
 
     def __str__(self):
-        return f"{self.unique_id} : {self.post_url} : {self.username} : {self.user_karma} : " \
-               f"{self.user_cake_day.date()} : {self.comments_number} : {self.votes_number} : " \
-               f"{self.post_category} : {self.post_date.date()}"
+        return f"{self.unique_id};{self.post_url};{self.username};{self.user_karma};" \
+               f"{self.user_cake_day.date()};{self.comments_number};{self.votes_number};" \
+               f"{self.post_category};{self.post_date.date()}"
 
     def write_to_file(self, file_path):
-        pass
+        with open(file_path, "a") as file:
+            file.write(f"{self.__str__()}{os.linesep}")
 
 
-def get_reddit_page():
-    options = Options()
-    options.add_argument("--lang=de-DE")
-    browser = webdriver.Chrome("/usr/lib/chromium-browser/chromedriver", options=options)
+def create_file():
+    current_date = datetime.now()
+    filename = f"reddit-{current_date.strftime('%Y%m%d%H%M')}.txt"
+    file = open(filename, "a")
+    file.close()
+
+    return filename
+
+
+def parse_reddit_page():
+    filename = create_file()
+    browser = webdriver.Chrome("/usr/lib/chromium-browser/chromedriver")
     browser.maximize_window()
     browser.get("https://www.reddit.com/top/?t=month")
     body_tag = browser.find_element_by_tag_name("body")
 
-    for i in range(1):
+    for i in range(100):
         body_tag.send_keys(Keys.PAGE_DOWN)
         time.sleep(0.3)
 
@@ -54,11 +63,9 @@ def get_reddit_page():
                                      "> div:nth-of-type(5)")
     single_posts = all_posts_html.find_all("div", class_="Post")
 
-    print(len(single_posts))
-    parsed_post = []
-    for post in single_posts[:5]:
+    for post in single_posts:
         votes_number = post.select_one("div > div > div").get_text()
-        post_url = "".join(["https://www.reddit.com", post.find("a", class_="_3jOxDPIQ0KaOWpzvSQo-1s")["href"]])
+        post_url = post.find("a", class_="_3jOxDPIQ0KaOWpzvSQo-1s")["href"]
 
         post_category_wrapper = post.find("div", class_="_3AStxql1mQsrZuUIFP9xSg nU4Je7n-eSXStTBAPMYt8")
 
@@ -104,9 +111,9 @@ def get_reddit_page():
         user_page_html = browser.page_source
         soup = BeautifulSoup(user_page_html, 'html.parser')
         user_profile_info_div_tag = soup.select_one("html > body > div:nth-of-type(1) > div > div:nth-of-type(2) >"
-                                                    " div:nth-of-type(2) > div > div > div > div:nth-of-type(2) >"
-                                                    " div:nth-of-type(4) > div:nth-of-type(2) > div > div:nth-of-type(1) >"
-                                                    " div > div:nth-of-type(4)")
+                                                    "div:nth-of-type(2) > div > div > div > div:nth-of-type(2) >"
+                                                    "div:nth-of-type(4) > div:nth-of-type(2) > div >"
+                                                    "div:nth-of-type(1) > div > div:nth-of-type(4)")
 
         # Age average limitations
         try:
@@ -114,18 +121,13 @@ def get_reddit_page():
             user_cake_day = dateparser.parse(user_profile_info_div_tag
                                              .select_one("div:nth-of-type(2) > div > span")
                                              .get_text())
-            parsed_post.append(ParsedInfo(post_url, username.lstrip("u/"), user_karma, user_cake_day, 0, 0,
-                                          comments_number, votes_number, post_category.lstrip("r/"), publish_date))
+            ParsedInfo(post_url, username.lstrip("u/"), user_karma, user_cake_day, 0, 0, comments_number,
+                       votes_number, post_category.lstrip("r/"), publish_date).write_to_file(filename)
         except AttributeError:
             continue
 
     browser.close()
-    print()
-    print(len(parsed_post))
-    print()
-    for post in parsed_post:
-        print(post)
 
 
 if __name__ == "__main__":
-    get_reddit_page()
+    parse_reddit_page()
