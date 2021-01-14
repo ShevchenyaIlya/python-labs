@@ -5,7 +5,6 @@ import logging
 import dateparser
 from bs4 import BeautifulSoup
 from selenium import webdriver
-from selenium.webdriver.common.keys import Keys
 from datetime import datetime, timedelta
 
 
@@ -26,8 +25,8 @@ class ParsedPostInfo:
         self.unique_id = uuid.uuid1().hex
 
     def __str__(self):
-        return f"{self.unique_id};{self.post_url};{self.username};{self.user_karma};" \
-               f"{self.user_cake_day.date()};{self.comments_number};{self.votes_number};" \
+        return f"{self.unique_id};{self.post_url};{self.username};{self.user_karma};{self.user_cake_day.date()};" \
+               f"{self.post_karma};{self.comment_karma};{self.comments_number};{self.votes_number};" \
                f"{self.post_category};{self.post_date.date()}"
 
     def write_to_file(self, file_path):
@@ -44,27 +43,32 @@ def create_file():
     return filename
 
 
-def parse_reddit_page():
-    filename = create_file()
-    browser = webdriver.Chrome("/usr/lib/chromium-browser/chromedriver")
-    browser.maximize_window()
-    browser.get("https://www.reddit.com/top/?t=month")
-    body_tag, total_posts_count = browser.find_element_by_tag_name("body"), 100
-
-    for i in range(1):
-        body_tag.send_keys(Keys.PAGE_DOWN)
-        time.sleep(0.2)
-
-    time.sleep(1)
-    html = browser.page_source
-
+def get_posts_list(html):
     soup = BeautifulSoup(html, 'html.parser')
     all_posts_html = soup.select_one("html > body > div:nth-of-type(1) > div > div:nth-of-type(2) > div:nth-of-type(2)"
                                      "> div > div > div > div:nth-of-type(2) > div:nth-of-type(3) > div:nth-of-type(1)"
                                      "> div:nth-of-type(5)")
-    single_posts = all_posts_html.find_all("div", class_="Post")
 
-    for post in single_posts[:5]:
+    return all_posts_html.find_all("div", class_="Post")
+
+
+def parse_reddit_page():
+    filename = create_file()
+    browser = webdriver.Chrome("/usr/lib/chromium-browser/chromedriver")
+    browser.set_window_position(-2000, 0)
+    browser.maximize_window()
+    browser.get("https://www.reddit.com/top/?t=month")
+    body_tag, total_posts_count, parsed_post_count = browser.find_element_by_tag_name("body"), 0, 0
+
+    while parsed_post_count < 20:
+        html = browser.page_source
+        single_posts = get_posts_list(html)
+        post = single_posts[total_posts_count]
+        post_id = post["id"]
+        current_post = browser.find_element_by_id(post_id)
+        hover = webdriver.ActionChains(browser).move_to_element(current_post)
+        hover.perform()
+
         votes_number = post.select_one("div > div > div").get_text()
         post_url = post.find("a", class_="_3jOxDPIQ0KaOWpzvSQo-1s")["href"]
 
@@ -82,6 +86,7 @@ def parse_reddit_page():
             username = name_parse_string.get_text()
             user_page_url = "".join(["https://www.reddit.com", name_parse_string["href"]])
         except AttributeError:
+            total_posts_count += 1
             continue
 
         publish_date = post.find("a", class_="_3jOxDPIQ0KaOWpzvSQo-1s").get_text()
@@ -98,19 +103,8 @@ def parse_reddit_page():
         else:
             comments_number = comments_number[0].select_one("div").find_all(recursive=False)[-1].get_text()
 
-        # browser.find_element_by_tag_name("body").send_keys(Keys.COMMAND + 't')
         browser.execute_script(f"window.open('{user_page_url}');")
         browser.switch_to.window(browser.window_handles[1])
-        # browser.get(user_page_url)
-        time.sleep(2)
-
-        # element_to_hover_over = browser.find_element_by_id("profile--id-card--highlight-tooltip--karma")
-        # hover = webdriver.ActionChains(browser).move_to_element(element_to_hover_over)
-        # hover.perform()
-        # time.sleep(3)
-        # # data_in_the_bubble = browser.find_element_by_xpath("//*[@id='profile--id-card--highlight-tooltip--karma']")
-        # # hover_data = data_in_the_bubble.get_attribute("innerHTML")
-        # print(browser)
 
         user_page_html = browser.page_source
         soup = BeautifulSoup(user_page_html, 'html.parser')
@@ -121,8 +115,20 @@ def parse_reddit_page():
 
         browser.close()
         browser.switch_to.window(browser.window_handles[0])
+        input_el = browser.find_element_by_id(f'UserInfoTooltip--{post_id}')
+        td_p_input = input_el.find_element_by_xpath('..')
+        hover = webdriver.ActionChains(browser).move_to_element(td_p_input)
+        hover.perform()
+        time.sleep(2)
+
+        popup_menu = BeautifulSoup(browser.page_source, 'html.parser')\
+            .find("div", id=f"UserInfoTooltip--{post_id}-hover-id")
+        popup_menu = popup_menu.find_all("div", class_="_18aX_pAQub_mu1suz4-i8j")
+        post_karma, comment_karma = popup_menu[0].get_text(), popup_menu[1].get_text()
+
         # Age average limitations
         try:
+            total_posts_count += 1
             user_karma = user_profile_info_div_tag.select_one("div > div > span").get_text()
             user_cake_day = dateparser.parse(user_profile_info_div_tag
                                              .select_one("div:nth-of-type(2) > div > span")
@@ -130,11 +136,15 @@ def parse_reddit_page():
         except AttributeError:
             continue
         else:
-            ParsedPostInfo(post_url, username.lstrip("u/"), user_karma, user_cake_day, 0, 0, comments_number,
-                           votes_number, post_category.lstrip("r/"), publish_date).write_to_file(filename)
+            ParsedPostInfo(post_url, username.lstrip("u/"), user_karma, user_cake_day, post_karma,
+                           comment_karma, comments_number, votes_number, post_category.lstrip("r/"),
+                           publish_date).write_to_file(filename)
+            parsed_post_count += 1
 
     browser.quit()
 
 
 if __name__ == "__main__":
+    start = time.time()
     parse_reddit_page()
+    print('It took', time.time() - start, 'seconds.')
