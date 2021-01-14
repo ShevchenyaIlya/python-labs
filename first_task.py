@@ -1,14 +1,15 @@
-import time
 import os
-import dateparser
+import time
 import uuid
+import logging
+import dateparser
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
 from datetime import datetime, timedelta
 
 
-class ParsedInfo:
+class ParsedPostInfo:
     def __init__(self, post_url, username, user_karma, user_cake_day, post_karma, comment_karma,
                  comments_number, votes_number, post_category, post_date):
         self.post_url = post_url
@@ -48,11 +49,11 @@ def parse_reddit_page():
     browser = webdriver.Chrome("/usr/lib/chromium-browser/chromedriver")
     browser.maximize_window()
     browser.get("https://www.reddit.com/top/?t=month")
-    body_tag = browser.find_element_by_tag_name("body")
+    body_tag, total_posts_count = browser.find_element_by_tag_name("body"), 100
 
-    for i in range(100):
+    for i in range(1):
         body_tag.send_keys(Keys.PAGE_DOWN)
-        time.sleep(0.3)
+        time.sleep(0.2)
 
     time.sleep(1)
     html = browser.page_source
@@ -63,7 +64,7 @@ def parse_reddit_page():
                                      "> div:nth-of-type(5)")
     single_posts = all_posts_html.find_all("div", class_="Post")
 
-    for post in single_posts:
+    for post in single_posts[:5]:
         votes_number = post.select_one("div > div > div").get_text()
         post_url = post.find("a", class_="_3jOxDPIQ0KaOWpzvSQo-1s")["href"]
 
@@ -85,8 +86,8 @@ def parse_reddit_page():
 
         publish_date = post.find("a", class_="_3jOxDPIQ0KaOWpzvSQo-1s").get_text()
 
-        day_before = int(publish_date.split(" ")[0])
-        publish_date = datetime.today() - timedelta(days=day_before)
+        days_ago = int(publish_date.split(" ")[0])
+        publish_date = datetime.today() - timedelta(days=days_ago)
 
         comments_number = post.select_one("div > div > div:nth-of-type(2)").find_all(recursive=False)[-1]
         comments_number = comments_number.select("a > span")
@@ -97,16 +98,19 @@ def parse_reddit_page():
         else:
             comments_number = comments_number[0].select_one("div").find_all(recursive=False)[-1].get_text()
 
-        browser.get(user_page_url)
-        time.sleep(3)
+        # browser.find_element_by_tag_name("body").send_keys(Keys.COMMAND + 't')
+        browser.execute_script(f"window.open('{user_page_url}');")
+        browser.switch_to.window(browser.window_handles[1])
+        # browser.get(user_page_url)
+        time.sleep(2)
 
         # element_to_hover_over = browser.find_element_by_id("profile--id-card--highlight-tooltip--karma")
         # hover = webdriver.ActionChains(browser).move_to_element(element_to_hover_over)
         # hover.perform()
         # time.sleep(3)
-        # data_in_the_bubble = browser.find_element_by_xpath("//*[@id='profile--id-card--highlight-tooltip--karma']")
-        # hover_data = data_in_the_bubble.get_attribute("innerHTML")
-        # print(hover_data)
+        # # data_in_the_bubble = browser.find_element_by_xpath("//*[@id='profile--id-card--highlight-tooltip--karma']")
+        # # hover_data = data_in_the_bubble.get_attribute("innerHTML")
+        # print(browser)
 
         user_page_html = browser.page_source
         soup = BeautifulSoup(user_page_html, 'html.parser')
@@ -115,18 +119,21 @@ def parse_reddit_page():
                                                     "div:nth-of-type(4) > div:nth-of-type(2) > div >"
                                                     "div:nth-of-type(1) > div > div:nth-of-type(4)")
 
+        browser.close()
+        browser.switch_to.window(browser.window_handles[0])
         # Age average limitations
         try:
             user_karma = user_profile_info_div_tag.select_one("div > div > span").get_text()
             user_cake_day = dateparser.parse(user_profile_info_div_tag
                                              .select_one("div:nth-of-type(2) > div > span")
                                              .get_text())
-            ParsedInfo(post_url, username.lstrip("u/"), user_karma, user_cake_day, 0, 0, comments_number,
-                       votes_number, post_category.lstrip("r/"), publish_date).write_to_file(filename)
         except AttributeError:
             continue
+        else:
+            ParsedPostInfo(post_url, username.lstrip("u/"), user_karma, user_cake_day, 0, 0, comments_number,
+                           votes_number, post_category.lstrip("r/"), publish_date).write_to_file(filename)
 
-    browser.close()
+    browser.quit()
 
 
 if __name__ == "__main__":
