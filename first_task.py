@@ -8,7 +8,9 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.common.exceptions import TimeoutException
 from datetime import datetime, timedelta
+import traceback
 
 
 def serialize_output_string(parsed_data):
@@ -55,10 +57,10 @@ def get_posts_list(html):
     return all_posts_html.find_all("div", class_="Post")
 
 
-def config_logger():
+def config_logger(log_level):
     logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))
     logger = logging.getLogger("reddit_parser")
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(log_level)
     return logger
 
 
@@ -74,12 +76,11 @@ def get_user_html_from_new_browser_tab(browser, user_page_url):
 
     browser.close()
     browser.switch_to.window(browser.window_handles[0])
-    return browser, user_profile_info
+    return user_profile_info
 
 
-def parse_reddit_page(chrome_drive_path):
-    post_count = 100
-    logger = config_logger()
+def parse_reddit_page(chrome_drive_path, log_level, post_count):
+    logger = config_logger(log_level)
     filename = generate_filename()
     truncate_file_content(filename)
     logger.info(f"The filename: {filename}!")
@@ -132,14 +133,14 @@ def parse_reddit_page(chrome_drive_path):
                 parsed_data["comments_number"] = comments_number[0].select_one("div").find_all(recursive=False)[-1]\
                     .get_text()
 
-            browser, user_profile_info = get_user_html_from_new_browser_tab(browser, user_page_url)
+            user_profile_info = get_user_html_from_new_browser_tab(browser, user_page_url)
             popup_menu = browser.find_element_by_id(f"UserInfoTooltip--{post_id}")
             popup_menu = popup_menu.find_element_by_xpath("..")
             hover = webdriver.ActionChains(browser).move_to_element(popup_menu)
             hover.perform()
 
-            element = WebDriverWait(browser, 20).until(
-                expected_conditions.element_to_be_clickable((By.ID, f"UserInfoTooltip--{post_id}-hover-id"))
+            WebDriverWait(browser, 10).until(
+                expected_conditions.presence_of_element_located((By.ID, f"UserInfoTooltip--{post_id}-hover-id"))
             )
 
             popup_menu = BeautifulSoup(browser.page_source, "html.parser")\
@@ -169,18 +170,32 @@ def parse_reddit_page(chrome_drive_path):
 
     except Exception as exception:
         logger.error(exception)
+        traceback.print_exc(chain=True)
         browser.quit()
 
 
 def parse_command_line_arguments():
-    my_parser = argparse.ArgumentParser(description='Reddit parser')
-    my_parser.add_argument('--path', metavar='path', type=str, help='Chromedriver path',
-                           default="/usr/lib/chromium-browser/chromedriver")
-    args = my_parser.parse_args()
-    return args.path
+    argument_parser = argparse.ArgumentParser(description="Reddit parser")
+    argument_parser.add_argument("--path", metavar="path", type=str, help="Chromedriver path",
+                                 default="/usr/lib/chromium-browser/chromedriver")
+    argument_parser.add_argument("--log_level", metavar="log_level", type=str, default="DEBUG",
+                                 choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                                 help="Minimal logging level('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
+    argument_parser.add_argument("--post_count", metavar="post_count", type=int, default=20,
+                                 choices=range(0, 101), help="Parsed post count")
+    args = argument_parser.parse_args()
+
+    return args.path, args.log_level, args.post_count
+
+
+def string_to_logging_level(log_level):
+    possible_levels = {'DEBUG': logging.DEBUG, 'INFO': logging.INFO, 'WARNING': logging.WARNING,
+                       'ERROR': logging.ERROR, 'CRITICAL': logging.CRITICAL}
+
+    return possible_levels[log_level]
 
 
 if __name__ == "__main__":
-    chrome_drive_file_path = parse_command_line_arguments()
-    if os.path.isfile(chrome_drive_file_path):
-        parse_reddit_page(chrome_drive_file_path)
+    chrome_driver, min_log_level, max_post_count = parse_command_line_arguments()
+    if os.path.isfile(chrome_driver):
+        parse_reddit_page(chrome_driver, string_to_logging_level(min_log_level), max_post_count)
