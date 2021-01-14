@@ -78,7 +78,7 @@ def get_user_html_from_new_browser_tab(browser, user_page_url):
 
 
 def parse_reddit_page(chrome_drive_path):
-    post_count = 20
+    post_count = 100
     logger = config_logger()
     filename = generate_filename()
     truncate_file_content(filename)
@@ -103,12 +103,13 @@ def parse_reddit_page(chrome_drive_path):
             parsed_data["post_url"] = post.find("a", class_="_3jOxDPIQ0KaOWpzvSQo-1s")["href"]
             post_category_wrapper = post.find("div", class_="_3AStxql1mQsrZuUIFP9xSg nU4Je7n-eSXStTBAPMYt8")
 
-            parsed_data["post_category"] = post_category_wrapper.find("a", class_="_3ryJoIoycVkA88fy40qNJc").get_text()
+            parsed_data["post_category"] = post_category_wrapper.find("a", class_="_3ryJoIoycVkA88fy40qNJc")\
+                .get_text().lstrip("r/")
             name_parse_string = post.find("a", class_="_2tbHP6ZydRpjI44J3syuqC _23wugcdiaj44hdfugIAlnX"
                                                       " oQctV4n0yUb0uiHDdGnmE")
 
             try:
-                parsed_data["username"] = name_parse_string.get_text()
+                parsed_data["username"] = name_parse_string.get_text().lstrip("u/")
                 user_page_url = "".join(["https://www.reddit.com", name_parse_string["href"]])
             except AttributeError:
                 total_posts_count += 1
