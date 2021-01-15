@@ -3,14 +3,26 @@ import uuid
 import logging
 import argparse
 import dateparser
+from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException
-from datetime import datetime, timedelta
-import traceback
+
+
+class SerializedPostsContainer:
+    def __init__(self):
+        self.container = []
+
+    def add_serialized_line(self, parsed_info):
+        self.container.append(parsed_info)
+
+    def save(self, filename):
+        with open(filename, "w") as file:
+            for serialize_post in self.container:
+                file.write(f"{serialize_post}{os.linesep}")
 
 
 def serialize_output_string(parsed_data):
@@ -22,11 +34,6 @@ def serialize_output_string(parsed_data):
         output_string = ";".join([output_string, parsed_data[field]])
 
     return output_string
-
-
-def write_parsed_info_to_file(parsed_info, filename):
-    with open(filename, "a") as file:
-        file.write(f"{parsed_info}{os.linesep}")
 
 
 def config_browser(chrome_drive_path):
@@ -79,98 +86,140 @@ def get_user_html_from_new_browser_tab(browser, user_page_url):
     return user_profile_info
 
 
+def parse_publication_date(post):
+    publish_date = post.find("a", class_="_3jOxDPIQ0KaOWpzvSQo-1s").get_text()
+    days_ago = int(publish_date.split(" ")[0])
+    post_date = datetime.today() - timedelta(days=days_ago)
+    return str(post_date.date())
+
+
+def parse_comment_number(post):
+    comments_number = post.select_one("div > div > div:nth-of-type(2)").find_all(recursive=False)[-1]
+    comments_number = comments_number.select("a > span")
+
+    # Representation may have distinct html formats
+    if len(comments_number) == 1:
+        return comments_number[0].get_text().split(" ")[0]
+    else:
+        return comments_number[0].select_one("div").find_all(recursive=False)[-1].get_text()
+
+
+def hover_current_post_element(browser, element):
+    hover = webdriver.ActionChains(browser).move_to_element(element)
+    hover.perform()
+
+
+def parse_main_page(current_post_info, post, post_id, logger):
+    current_post_info["votes_number"] = post.select_one("div > div > div").get_text()
+    current_post_info["post_url"] = post.find("a", class_="_3jOxDPIQ0KaOWpzvSQo-1s")["href"]
+    current_post_info["post_category"] = post\
+        .find("div", class_="_3AStxql1mQsrZuUIFP9xSg nU4Je7n-eSXStTBAPMYt8")\
+        .find("a", class_="_3ryJoIoycVkA88fy40qNJc") \
+        .get_text()\
+        .lstrip("r/")
+
+    name_parse_string = post.find(
+        "a", class_="_2tbHP6ZydRpjI44J3syuqC _23wugcdiaj44hdfugIAlnX oQctV4n0yUb0uiHDdGnmE"
+    )
+
+    try:
+        current_post_info["username"] = name_parse_string.get_text().lstrip("u/")
+        user_page_url = "".join(["https://www.reddit.com", name_parse_string["href"]])
+    except AttributeError:
+        logger.debug(f"The post (post_id: {post_id}, url: {current_post_info['post_url']}) "
+                     f"exists, but the user has been deleted!")
+        return None
+
+    current_post_info["post_date"] = parse_publication_date(post)
+    current_post_info["comments_number"] = parse_comment_number(post)
+
+    return user_page_url
+
+
+def parse_user_page(browser, user_page_url, current_post_info, logger):
+    user_profile_info = get_user_html_from_new_browser_tab(browser, user_page_url)
+
+    try:
+        current_post_info["user_karma"] = user_profile_info.select_one("div > div > span").get_text()
+        user_cake_day = dateparser.parse(user_profile_info
+                                         .select_one("div:nth-of-type(2) > div > span")
+                                         .get_text())
+
+        current_post_info["user_cake_day"] = str(user_cake_day.date())
+    except AttributeError:
+        logger.debug(f"Failed to access user(username: {current_post_info['username']}, "
+                     f"link: {user_page_url}) page due to age limit!")
+        return False
+
+    return True
+
+
+def parse_popup_menu(browser, post_id, current_post_info, logger):
+    popup_menu = browser.find_element_by_id(f"UserInfoTooltip--{post_id}")
+    popup_menu = popup_menu.find_element_by_xpath("..")
+    hover_current_post_element(browser, popup_menu)
+
+    try:
+        popup_element = WebDriverWait(browser, 10).until(
+            expected_conditions.presence_of_element_located((By.ID, f"UserInfoTooltip--{post_id}-hover-id"))
+        )
+    except TimeoutException:
+        logger.debug(f"Timeout exception. "
+                     f"Popup menu does not appear for this post(url: {current_post_info['post_url']}).")
+        return False
+
+    popup_menu_info = BeautifulSoup(popup_element.get_attribute("innerHTML"), "html.parser") \
+        .find_all("div", class_="_18aX_pAQub_mu1suz4-i8j")
+    current_post_info["post_karma"] = popup_menu_info[0].get_text()
+    current_post_info["comment_karma"] = popup_menu_info[1].get_text()
+
+    return True
+
+
 def parse_reddit_page(chrome_drive_path, log_level, post_count):
     logger = config_logger(log_level)
     filename = generate_filename()
     truncate_file_content(filename)
     logger.info(f"The filename: {filename}!")
     browser = config_browser(chrome_drive_path)
+    parsed_information = SerializedPostsContainer()
 
     try:
         browser.get("https://www.reddit.com/top/?t=month")
         total_posts_count, parsed_post_count = 0, 0
 
         while parsed_post_count < post_count:
-            parsed_data = {}
+            current_post_info = {}
             single_posts = get_posts_list(browser.page_source)
             post = single_posts[total_posts_count]
             post_id = post["id"]
+
             current_post = browser.find_element_by_id(post_id)
+            hover_current_post_element(browser, current_post)
 
-            hover = webdriver.ActionChains(browser).move_to_element(current_post)
-            hover.perform()
-
-            parsed_data["votes_number"] = post.select_one("div > div > div").get_text()
-            parsed_data["post_url"] = post.find("a", class_="_3jOxDPIQ0KaOWpzvSQo-1s")["href"]
-            post_category_wrapper = post.find("div", class_="_3AStxql1mQsrZuUIFP9xSg nU4Je7n-eSXStTBAPMYt8")
-
-            parsed_data["post_category"] = post_category_wrapper.find("a", class_="_3ryJoIoycVkA88fy40qNJc")\
-                .get_text().lstrip("r/")
-            name_parse_string = post.find("a", class_="_2tbHP6ZydRpjI44J3syuqC _23wugcdiaj44hdfugIAlnX"
-                                                      " oQctV4n0yUb0uiHDdGnmE")
-
-            try:
-                parsed_data["username"] = name_parse_string.get_text().lstrip("u/")
-                user_page_url = "".join(["https://www.reddit.com", name_parse_string["href"]])
-            except AttributeError:
+            user_page_url = parse_main_page(current_post_info, post, post_id, logger)
+            if user_page_url is None:
                 total_posts_count += 1
-                logger.debug(f"The post (post_id: {post_id}, url: {parsed_data['post_url']}) "
-                             f"exists, but the user has been deleted!")
                 continue
 
-            publish_date = post.find("a", class_="_3jOxDPIQ0KaOWpzvSQo-1s").get_text()
-            days_ago = int(publish_date.split(" ")[0])
-            post_date = datetime.today() - timedelta(days=days_ago)
-            parsed_data["post_date"] = str(post_date.date())
-
-            comments_number = post.select_one("div > div > div:nth-of-type(2)").find_all(recursive=False)[-1]
-            comments_number = comments_number.select("a > span")
-
-            # Representation may have distinct html formats
-            if len(comments_number) == 1:
-                parsed_data["comments_number"] = comments_number[0].get_text().split(" ")[0]
-            else:
-                parsed_data["comments_number"] = comments_number[0].select_one("div").find_all(recursive=False)[-1]\
-                    .get_text()
-
-            user_profile_info = get_user_html_from_new_browser_tab(browser, user_page_url)
-            popup_menu = browser.find_element_by_id(f"UserInfoTooltip--{post_id}")
-            popup_menu = popup_menu.find_element_by_xpath("..")
-            hover = webdriver.ActionChains(browser).move_to_element(popup_menu)
-            hover.perform()
-
-            WebDriverWait(browser, 10).until(
-                expected_conditions.presence_of_element_located((By.ID, f"UserInfoTooltip--{post_id}-hover-id"))
-            )
-
-            popup_menu = BeautifulSoup(browser.page_source, "html.parser")\
-                .find("div", id=f"UserInfoTooltip--{post_id}-hover-id")\
-                .find_all("div", class_="_18aX_pAQub_mu1suz4-i8j")
-
-            parsed_data["post_karma"], parsed_data["comment_karma"] = popup_menu[0].get_text(), popup_menu[1].get_text()
-
-            try:
+            if not parse_popup_menu(browser, post_id, current_post_info, logger):
                 total_posts_count += 1
-                parsed_data["user_karma"] = user_profile_info.select_one("div > div > span").get_text()
-                user_cake_day = dateparser.parse(user_profile_info
-                                                 .select_one("div:nth-of-type(2) > div > span")
-                                                 .get_text())
-                parsed_data["user_cake_day"] = str(user_cake_day.date())
-            except AttributeError:
-                logger.debug(f"Failed to access user(username: {parsed_data['username']}, "
-                             f"link: {user_page_url}) page due to age limit!")
                 continue
-            else:
-                parsed_info = serialize_output_string(parsed_data)
-                write_parsed_info_to_file(parsed_info, filename)
-                logger.debug(f"All information has been received on this post(url: {parsed_data['post_url']})")
+
+            total_posts_count += 1
+            if parse_user_page(browser, user_page_url, current_post_info, logger):
+                parsed_information.add_serialized_line(serialize_output_string(current_post_info))
+                logger.debug(f"All information has been received on this post(url: {current_post_info['post_url']})")
                 parsed_post_count += 1
+            else:
+                continue
         else:
             logger.info(f"{post_count} records were successfully placed in the file!")
 
     except Exception as exception:
-        logger.error(exception)
-        traceback.print_exc(chain=True)
+        logger.error(exception, exc_info=True)
+    finally:
+        parsed_information.save(filename)
         browser.quit()
 
 
@@ -181,7 +230,7 @@ def parse_command_line_arguments():
     argument_parser.add_argument("--log_level", metavar="log_level", type=str, default="DEBUG",
                                  choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                                  help="Minimal logging level('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
-    argument_parser.add_argument("--post_count", metavar="post_count", type=int, default=20,
+    argument_parser.add_argument("--post_count", metavar="post_count", type=int, default=100,
                                  choices=range(0, 101), help="Parsed post count")
     args = argument_parser.parse_args()
 
