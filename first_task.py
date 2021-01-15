@@ -12,17 +12,10 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
 
 
-class SerializedPostsContainer:
-    def __init__(self):
-        self.container = []
-
-    def add_serialized_line(self, parsed_info):
-        self.container.append(parsed_info)
-
-    def save(self, filename):
-        with open(filename, "w") as file:
-            for serialize_post in self.container:
-                file.write(f"{serialize_post}{os.linesep}")
+def write_to_file(filename, data):
+    with open(filename, "w") as file:
+        for serialize_post in data:
+            file.write(f"{serialize_post}{os.linesep}")
 
 
 def serialize_output_string(parsed_data):
@@ -86,8 +79,8 @@ def get_user_html_from_new_browser_tab(browser, user_page_url):
     return user_profile_info
 
 
-def parse_publication_date(post):
-    publish_date = post.find("a", class_="_3jOxDPIQ0KaOWpzvSQo-1s").get_text()
+def parse_publication_date(tag_with_date):
+    publish_date = tag_with_date.get_text()
     days_ago = int(publish_date.split(" ")[0])
     post_date = datetime.today() - timedelta(days=days_ago)
     return str(post_date.date())
@@ -111,27 +104,27 @@ def hover_current_post_element(browser, element):
 
 def parse_main_page(current_post_info, post, post_id, logger):
     current_post_info["votes_number"] = post.select_one("div > div > div").get_text()
-    current_post_info["post_url"] = post.find("a", class_="_3jOxDPIQ0KaOWpzvSQo-1s")["href"]
-    current_post_info["post_category"] = post\
-        .find("div", class_="_3AStxql1mQsrZuUIFP9xSg nU4Je7n-eSXStTBAPMYt8")\
-        .find("a", class_="_3ryJoIoycVkA88fy40qNJc") \
-        .get_text()\
-        .lstrip("r/")
+    top_post_html_source = post.select_one("div:nth-of-type(2)").findChildren(recursive=False)[0]
+    if top_post_html_source.name == "article":
+        top_post_html_source = top_post_html_source.select_one("div > div > div:nth-of-type(2) > div")
+    else:
+        top_post_html_source = top_post_html_source.select_one("div > div:nth-of-type(2) > div")
 
-    name_parse_string = post.find(
-        "a", class_="_2tbHP6ZydRpjI44J3syuqC _23wugcdiaj44hdfugIAlnX oQctV4n0yUb0uiHDdGnmE"
-    )
+    all_a_tags_inside_block = top_post_html_source.find_all("a")
+    current_post_info["post_url"] = all_a_tags_inside_block[-1]["href"]
+    current_post_info["post_category"] = top_post_html_source.select_one("div > a").get_text().lstrip("r/")
 
-    try:
-        current_post_info["username"] = name_parse_string.get_text().lstrip("u/")
-        user_page_url = "".join(["https://www.reddit.com", name_parse_string["href"]])
-    except AttributeError:
+    # User deleted
+    if len(all_a_tags_inside_block) == 2:
         logger.debug(f"The post (post_id: {post_id}, url: {current_post_info['post_url']}) "
                      f"exists, but the user has been deleted!")
         return None
 
-    current_post_info["post_date"] = parse_publication_date(post)
+    name_parse_string = all_a_tags_inside_block[1]
+    current_post_info["username"] = name_parse_string.get_text().lstrip("u/")
+    current_post_info["post_date"] = parse_publication_date(all_a_tags_inside_block[-1])
     current_post_info["comments_number"] = parse_comment_number(post)
+    user_page_url = "".join(["https://www.reddit.com", name_parse_string["href"]])
 
     return user_page_url
 
@@ -167,21 +160,23 @@ def parse_popup_menu(browser, post_id, current_post_info, logger):
         logger.debug(f"Popup menu does not appear for this post(url: {current_post_info['post_url']}).")
         return False
 
-    popup_menu_info = BeautifulSoup(popup_element.get_attribute("innerHTML"), "html.parser") \
-        .find_all("div", class_="_18aX_pAQub_mu1suz4-i8j")
-    current_post_info["post_karma"] = popup_menu_info[0].get_text()
-    current_post_info["comment_karma"] = popup_menu_info[1].get_text()
+    popup_menu_info = BeautifulSoup(popup_element.get_attribute("innerHTML"), "html.parser")\
+        .findChildren(recursive=False)[-2]\
+        .findChildren(recursive=False)[-3]
+
+    tags_with_numbers = list(popup_menu_info.children)
+    current_post_info["post_karma"] = tags_with_numbers[1].select_one("div").get_text()
+    current_post_info["comment_karma"] = tags_with_numbers[2].select_one("div").get_text()
 
     return True
 
 
-def parse_reddit_page(chrome_drive_path, log_level, post_count):
-    logger = config_logger(log_level)
+def parse_reddit_page(chrome_drive_path, post_count, logger):
     filename = generate_filename()
     truncate_file_content(filename)
     logger.info(f"The filename: {filename}!")
     browser = config_browser(chrome_drive_path)
-    parsed_information = SerializedPostsContainer()
+    parsed_information = []
 
     try:
         browser.get("https://www.reddit.com/top/?t=month")
@@ -207,7 +202,7 @@ def parse_reddit_page(chrome_drive_path, log_level, post_count):
 
             total_posts_count += 1
             if parse_user_page(browser, user_page_url, current_post_info, logger):
-                parsed_information.add_serialized_line(serialize_output_string(current_post_info))
+                parsed_information.append(serialize_output_string(current_post_info))
                 logger.debug(f"All information has been received on this post(url: {current_post_info['post_url']})")
                 parsed_post_count += 1
             else:
@@ -218,7 +213,7 @@ def parse_reddit_page(chrome_drive_path, log_level, post_count):
     except Exception as exception:
         logger.error(exception, exc_info=True)
     finally:
-        parsed_information.save(filename)
+        write_to_file(filename, parsed_information)
         browser.quit()
 
 
@@ -245,5 +240,9 @@ def string_to_logging_level(log_level):
 
 if __name__ == "__main__":
     chrome_driver, min_log_level, max_post_count = parse_command_line_arguments()
+    configured_logger = config_logger(string_to_logging_level(min_log_level))
+
     if os.path.isfile(chrome_driver):
-        parse_reddit_page(chrome_driver, string_to_logging_level(min_log_level), max_post_count)
+        parse_reddit_page(chrome_driver, max_post_count, configured_logger)
+    else:
+        configured_logger.error(f"Chrome drive does not exists at this link: {chrome_driver}!")
