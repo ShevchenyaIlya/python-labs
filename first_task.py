@@ -9,7 +9,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
 
 
 class SerializedPostsContainer:
@@ -163,9 +163,8 @@ def parse_popup_menu(browser, post_id, current_post_info, logger):
         popup_element = WebDriverWait(browser, 10).until(
             expected_conditions.presence_of_element_located((By.ID, f"UserInfoTooltip--{post_id}-hover-id"))
         )
-    except TimeoutException:
-        logger.debug(f"Timeout exception. "
-                     f"Popup menu does not appear for this post(url: {current_post_info['post_url']}).")
+    except (TimeoutException, StaleElementReferenceException):
+        logger.debug(f"Popup menu does not appear for this post(url: {current_post_info['post_url']}).")
         return False
 
     popup_menu_info = BeautifulSoup(popup_element.get_attribute("innerHTML"), "html.parser") \
