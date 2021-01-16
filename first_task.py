@@ -1,5 +1,6 @@
 import os
 import uuid
+import time
 import logging
 import argparse
 import dateparser
@@ -49,7 +50,7 @@ def truncate_file_content(filename):
 
 
 def get_posts_list(html):
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(html, "lxml")
     all_posts_html = soup.select_one("html > body > div:nth-of-type(1) > div > div:nth-of-type(2) > div:nth-of-type(2)"
                                      "> div > div > div > div:nth-of-type(2) > div:nth-of-type(3) > div:nth-of-type(1)"
                                      "> div:nth-of-type(5)")
@@ -68,7 +69,7 @@ def get_user_html_from_new_browser_tab(browser, user_page_url):
     browser.execute_script(f"window.open('{user_page_url}');")
     browser.switch_to.window(browser.window_handles[1])
     user_page_html = browser.page_source
-    soup = BeautifulSoup(user_page_html, "html.parser")
+    soup = BeautifulSoup(user_page_html, "lxml")
     user_profile_info = soup.select_one("html > body > div:nth-of-type(1) > div > div:nth-of-type(2) >"
                                         "div:nth-of-type(2) > div > div > div > div:nth-of-type(2) >"
                                         "div:nth-of-type(4) > div:nth-of-type(2) > div >"
@@ -224,7 +225,7 @@ def parse_command_line_arguments():
     argument_parser.add_argument("--log_level", metavar="log_level", type=str, default="DEBUG",
                                  choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                                  help="Minimal logging level('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
-    argument_parser.add_argument("--post_count", metavar="post_count", type=int, default=100,
+    argument_parser.add_argument("--post_count", metavar="post_count", type=int, default=20,
                                  choices=range(0, 101), help="Parsed post count")
     args = argument_parser.parse_args()
 
@@ -243,6 +244,8 @@ if __name__ == "__main__":
     configured_logger = config_logger(string_to_logging_level(min_log_level))
 
     if os.path.isfile(chrome_driver):
+        start = time.time()
         parse_reddit_page(chrome_driver, max_post_count, configured_logger)
+        print(time.time() - start, " seconds.")
     else:
         configured_logger.error(f"Chrome drive does not exists at this link: {chrome_driver}!")
