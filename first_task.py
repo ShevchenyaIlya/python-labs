@@ -10,6 +10,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
 
 
@@ -31,10 +32,15 @@ def serialize_output_string(parsed_data):
 
 
 def config_browser(chrome_drive_path):
+    caps = DesiredCapabilities().CHROME
+    caps["pageLoadStrategy"] = "normal"  # possible: "normal", "eagle", "none"
     options = webdriver.ChromeOptions()
     options.add_argument('headless')
     options.add_argument('window-size=1920x1080')
-    return webdriver.Chrome(chrome_drive_path, chrome_options=options)
+    options.add_argument('--blink-settings=imagesEnabled=false')
+    options.add_argument('--no-proxy-server')
+
+    return webdriver.Chrome(chrome_drive_path, chrome_options=options, desired_capabilities=caps)
 
 
 def generate_filename():
@@ -130,9 +136,7 @@ def parse_main_page(current_post_info, post, post_id, logger):
     return user_page_url
 
 
-def parse_user_page(browser, user_page_url, current_post_info, logger):
-    user_profile_info = get_user_html_from_new_browser_tab(browser, user_page_url)
-
+def parse_user_page(user_profile_info, user_page_url, current_post_info, logger):
     try:
         current_post_info["user_karma"] = user_profile_info.select_one("div > div > span").get_text()
         user_cake_day = dateparser.parse(user_profile_info
@@ -148,7 +152,7 @@ def parse_user_page(browser, user_page_url, current_post_info, logger):
     return True
 
 
-def parse_popup_menu(browser, post_id, current_post_info, logger):
+def navigate_popup_menu(browser, post_id, current_post_info, logger):
     popup_menu = browser.find_element_by_id(f"UserInfoTooltip--{post_id}")
     popup_menu = popup_menu.find_element_by_xpath("..")
     hover_current_post_element(browser, popup_menu)
@@ -159,8 +163,12 @@ def parse_popup_menu(browser, post_id, current_post_info, logger):
         )
     except (TimeoutException, StaleElementReferenceException):
         logger.debug(f"Popup menu does not appear for this post(url: {current_post_info['post_url']}).")
-        return False
+        return None
 
+    return popup_element
+
+
+def parse_popup_menu(current_post_info, popup_element):
     popup_menu_info = BeautifulSoup(popup_element.get_attribute("innerHTML"), "html.parser")\
         .findChildren(recursive=False)[-2]\
         .findChildren(recursive=False)[-3]
@@ -168,8 +176,6 @@ def parse_popup_menu(browser, post_id, current_post_info, logger):
     tags_with_numbers = list(popup_menu_info.children)
     current_post_info["post_karma"] = tags_with_numbers[1].select_one("div").get_text()
     current_post_info["comment_karma"] = tags_with_numbers[2].select_one("div").get_text()
-
-    return True
 
 
 def parse_reddit_page(chrome_drive_path, post_count, logger):
@@ -197,12 +203,16 @@ def parse_reddit_page(chrome_drive_path, post_count, logger):
                 total_posts_count += 1
                 continue
 
-            if not parse_popup_menu(browser, post_id, current_post_info, logger):
+            popup_element = navigate_popup_menu(browser, post_id, current_post_info, logger)
+            if popup_element is None:
                 total_posts_count += 1
                 continue
 
+            parse_popup_menu(current_post_info, popup_element)
+
             total_posts_count += 1
-            if parse_user_page(browser, user_page_url, current_post_info, logger):
+            user_profile_info = get_user_html_from_new_browser_tab(browser, user_page_url)
+            if parse_user_page(user_profile_info, user_page_url, current_post_info, logger):
                 parsed_information.append(serialize_output_string(current_post_info))
                 logger.debug(f"All information has been received on this post(url: {current_post_info['post_url']})")
                 parsed_post_count += 1
@@ -221,7 +231,7 @@ def parse_reddit_page(chrome_drive_path, post_count, logger):
 def parse_command_line_arguments():
     argument_parser = argparse.ArgumentParser(description="Reddit parser")
     argument_parser.add_argument("--path", metavar="path", type=str, help="Chromedriver path",
-                                 default="/usr/lib/chromium-browser/chromedriver")
+                                 default=find_chrome_driver())
     argument_parser.add_argument("--log_level", metavar="log_level", type=str, default="DEBUG",
                                  choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                                  help="Minimal logging level('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
@@ -237,6 +247,11 @@ def string_to_logging_level(log_level):
                        'ERROR': logging.ERROR, 'CRITICAL': logging.CRITICAL}
 
     return possible_levels[log_level]
+
+
+def find_chrome_driver():
+    stream = os.popen('which -a chromedriver')
+    return stream.read().rstrip(os.linesep)
 
 
 if __name__ == "__main__":
