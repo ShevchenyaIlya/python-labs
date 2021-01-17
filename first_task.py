@@ -4,6 +4,7 @@ import time
 import logging
 import argparse
 import dateparser
+from typing import List, Dict
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -14,13 +15,13 @@ from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
 
 
-def write_to_file(filename, data):
+def write_to_file(filename: str, data: List[str]) -> None:
     with open(filename, "w") as file:
         for serialize_post in data:
             file.write(f"{serialize_post}{os.linesep}")
 
 
-def serialize_output_string(parsed_data):
+def serialize_output_string(parsed_data: Dict[str, str]) -> str:
     sequence = ["post_url", "username", "user_karma", "user_cake_day", "post_karma", "comment_karma",
                 "post_date", "comments_number", "votes_number", "post_category"]
 
