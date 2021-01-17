@@ -4,7 +4,7 @@ import time
 import logging
 import argparse
 import dateparser
-from typing import List, Dict
+from typing import List, Dict, Tuple
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -32,7 +32,7 @@ def serialize_output_string(parsed_data: Dict[str, str]) -> str:
     return output_string
 
 
-def config_browser(chrome_drive_path):
+def config_browser(chrome_drive_path: str) -> webdriver.Chrome:
     caps = DesiredCapabilities().CHROME
     caps["pageLoadStrategy"] = "normal"  # possible: "normal", "eagle", "none"
     options = webdriver.ChromeOptions()
@@ -44,13 +44,13 @@ def config_browser(chrome_drive_path):
     return webdriver.Chrome(chrome_drive_path, chrome_options=options, desired_capabilities=caps)
 
 
-def generate_filename():
+def generate_filename() -> str:
     current_date = datetime.now()
     return f"reddit-{current_date.strftime('%Y%m%d%H%M')}.txt"
 
 
-def truncate_file_content(filename):
-    # Truncate content of file
+def truncate_file_content(filename: str) -> None:
+    """Truncate content of file if file exist"""
     if os.path.isfile(filename):
         with open(filename, "w") as file:
             file.truncate()
@@ -65,7 +65,7 @@ def get_posts_list(html):
     return all_posts_html.find_all("div", class_="Post")
 
 
-def config_logger(log_level):
+def config_logger(log_level: int) -> logging.Logger:
     logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))
     logger = logging.getLogger("reddit_parser")
     logger.setLevel(log_level)
@@ -179,7 +179,7 @@ def parse_popup_menu(current_post_info, popup_element):
     current_post_info["comment_karma"] = tags_with_numbers[2].select_one("div").get_text()
 
 
-def parse_reddit_page(chrome_drive_path, post_count, logger):
+def parse_reddit_page(chrome_drive_path: str, post_count: int, logger: logging.Logger) -> None:
     filename = generate_filename()
     truncate_file_content(filename)
     logger.info(f"The filename: {filename}!")
@@ -229,7 +229,7 @@ def parse_reddit_page(chrome_drive_path, post_count, logger):
         browser.quit()
 
 
-def parse_command_line_arguments():
+def parse_command_line_arguments() -> Tuple[str, str, int]:
     argument_parser = argparse.ArgumentParser(description="Reddit parser")
     argument_parser.add_argument("--path", metavar="path", type=str, help="Chromedriver path",
                                  default=find_chrome_driver())
@@ -243,14 +243,14 @@ def parse_command_line_arguments():
     return args.path, args.log_level, args.post_count
 
 
-def string_to_logging_level(log_level):
+def string_to_logging_level(log_level: str) -> int:
     possible_levels = {'DEBUG': logging.DEBUG, 'INFO': logging.INFO, 'WARNING': logging.WARNING,
                        'ERROR': logging.ERROR, 'CRITICAL': logging.CRITICAL}
 
     return possible_levels[log_level]
 
 
-def find_chrome_driver():
+def find_chrome_driver() -> str:
     stream = os.popen('which -a chromedriver')
     return stream.read().rstrip(os.linesep)
 
