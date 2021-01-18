@@ -1,5 +1,7 @@
 import os
 import uuid
+import time
+import json
 import logging
 import argparse
 import dateparser
@@ -253,7 +255,6 @@ def find_chrome_driver() -> str:
 
 
 def load_xpath_templates_from_json():
-    import json
     with open('xpath_config.json') as json_file:
         xpath_templates = json.load(json_file)
 
@@ -261,7 +262,6 @@ def load_xpath_templates_from_json():
 
 
 if __name__ == "__main__":
-    import time
     chrome_driver, min_log_level, max_post_count = parse_command_line_arguments()
     configured_logger = config_logger(string_to_logging_level(min_log_level))
     xpath = load_xpath_templates_from_json()
