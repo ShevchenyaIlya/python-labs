@@ -232,7 +232,7 @@ def parse_command_line_arguments() -> Tuple[str, str, int]:
     argument_parser = argparse.ArgumentParser(description="Reddit parser")
     argument_parser.add_argument("--path", metavar="path", type=str, help="Chromedriver path",
                                  default=find_chrome_driver())
-    argument_parser.add_argument("--log_level", metavar="log_level", type=str, default="DEBUG",
+    argument_parser.add_argument("--log_level", metavar="log_level", type=str, default="CRITICAL",
                                  choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                                  help="Minimal logging level('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
     argument_parser.add_argument("--post_count", metavar="post_count", type=int, default=20,
