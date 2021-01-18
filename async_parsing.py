@@ -166,8 +166,9 @@ def parse_popup_menu(current_post_info, popup_element):
     current_post_info["comment_karma"] = tags_with_numbers[2].select_one("div").get_text()
 
 
-async def main(browser, source, current_post, logger):
-    return await asyncio.gather(*[parse_user_page(browser, url, value, logger) for url, value in zip(source, current_post)])
+async def start_user_parsing(browser, source, current_post, logger):
+    return await asyncio.gather(*[parse_user_page(browser, url, value, logger)
+                                  for url, value in zip(source, current_post)])
 
 
 def parse_reddit_page(chrome_drive_path: str, post_count: int, logger: logging.Logger) -> None:
@@ -180,8 +181,8 @@ def parse_reddit_page(chrome_drive_path: str, post_count: int, logger: logging.L
 
     try:
         browser.get("https://www.reddit.com/top/?t=month")
-        total_posts_count, parsed_post_count = 0, 0
-        addition_counter = 0
+        total_posts_count, addition_counter = 0, 0
+
         while len(parsed_information) < post_count:
             current_post_info = {}
             single_posts = get_posts_list(browser.page_source)
@@ -203,21 +204,19 @@ def parse_reddit_page(chrome_drive_path: str, post_count: int, logger: logging.L
 
             total_posts_count += 1
             addition_counter += 1
-            user_source.append(user_page_url)
-            saved_dicts.append(current_post_info)
+            user_source.append(user_page_url), saved_dicts.append(current_post_info)
             if addition_counter == 10:
-                result = asyncio.run(main(browser, user_source, saved_dicts, logger))
+                result = asyncio.run(start_user_parsing(browser, user_source, saved_dicts, logger))
                 true_results = 0
-                for res, cur in result:
-                    if res is True:
+                for return_value, saved_dictionary in result:
+                    if return_value is True:
                         true_results += 1
-                        parsed_information.append(serialize_output_string(cur))
+                        parsed_information.append(serialize_output_string(saved_dictionary))
                         logger.debug(
-                            f"All information has been received on this post(url: {cur['post_url']})")
-                user_source.clear()
-                saved_dicts.clear()
+                            f"All information has been received on this post(url: {saved_dictionary['post_url']})")
+                user_source.clear(), saved_dicts.clear()
+
                 addition_counter = 0
-                parsed_post_count += true_results
         else:
             logger.info(f"{post_count} records were successfully placed in the file!")
 
