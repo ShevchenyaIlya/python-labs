@@ -5,6 +5,8 @@ import logging
 import argparse
 import dateparser
 import lxml
+import json
+import time
 from typing import List, Dict, Tuple
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
@@ -57,11 +59,9 @@ def truncate_file_content(filename: str) -> None:
             file.truncate()
 
 
-def get_posts_list(html):
+def get_posts_list(html, xpath_templates):
     soup = BeautifulSoup(html, "lxml")
-    all_posts_html = soup.select_one("html > body > div:nth-of-type(1) > div > div:nth-of-type(2) > div:nth-of-type(2)"
-                                     "> div > div > div > div:nth-of-type(2) > div:nth-of-type(3) > div:nth-of-type(1)"
-                                     "> div:nth-of-type(5)")
+    all_posts_html = soup.select_one(xpath_templates["all_posts_block"])
 
     return all_posts_html.find_all("div", class_="Post")
 
@@ -73,16 +73,13 @@ def config_logger(log_level: int) -> logging.Logger:
     return logger
 
 
-async def get_user_html_from_new_browser_tab(browser, user_page_url):
+async def get_user_html_from_new_browser_tab(browser, user_page_url, xpath_templates):
     browser.execute_script(f"window.open('{user_page_url}');")
     await asyncio.sleep(1)
     browser.switch_to.window(browser.window_handles[1])
     user_page_html = browser.page_source
     soup = BeautifulSoup(user_page_html, "lxml")
-    user_profile_info = soup.select_one("html > body > div:nth-of-type(1) > div > div:nth-of-type(2) >"
-                                        "div:nth-of-type(2) > div > div > div > div:nth-of-type(2) >"
-                                        "div:nth-of-type(4) > div:nth-of-type(2) > div >"
-                                        "div:nth-of-type(1) > div > div:nth-of-type(4)")
+    user_profile_info = soup.select_one(xpath_templates["user_profile_block"])
 
     browser.close()
     browser.switch_to.window(browser.window_handles[0])
@@ -96,8 +93,8 @@ def parse_publication_date(tag_with_date):
     return str(post_date.date())
 
 
-def parse_comment_number(post):
-    comments_number = post.select_one("div > div > div:nth-of-type(2)").find_all(recursive=False)[-1]
+def parse_comment_number(post, xpath_templates):
+    comments_number = post.select_one(xpath_templates["comments_number_inside_post"]).find_all(recursive=False)[-1]
     comments_number = comments_number.select("a > span")
 
     # Representation may have distinct html formats
@@ -112,17 +109,19 @@ def hover_current_post_element(browser, element):
     hover.perform()
 
 
-def parse_main_page(current_post_info, post, post_id, logger):
-    current_post_info["votes_number"] = post.select_one("div > div > div").get_text()
-    top_post_html_source = post.select_one("div:nth-of-type(2)").findChildren(recursive=False)[0]
+def parse_main_page(current_post_info, post, post_id, logger, xpath_templates):
+    current_post_info["votes_number"] = post.select_one(xpath_templates["votes_number_inside_post"]).get_text()
+
+    top_post_html_source = post.select_one(xpath_templates["top_post_line_block"]).findChildren(recursive=False)[0]
     if top_post_html_source.name == "article":
-        top_post_html_source = top_post_html_source.select_one("div > div > div:nth-of-type(2) > div")
+        top_post_html_source = top_post_html_source.select_one(xpath_templates["article_shell"])
     else:
-        top_post_html_source = top_post_html_source.select_one("div > div:nth-of-type(2) > div")
+        top_post_html_source = top_post_html_source.select_one(xpath_templates["div_shell"])
 
     all_a_tags_inside_block = top_post_html_source.find_all("a")
     current_post_info["post_url"] = all_a_tags_inside_block[-1]["href"]
-    current_post_info["post_category"] = top_post_html_source.select_one("div > a").get_text().lstrip("r/")
+    current_post_info["post_category"] = top_post_html_source.select_one(xpath_templates["post_category"])\
+        .get_text().lstrip("r/")
 
     # User deleted
     if len(all_a_tags_inside_block) == 2:
@@ -133,10 +132,27 @@ def parse_main_page(current_post_info, post, post_id, logger):
     name_parse_string = all_a_tags_inside_block[1]
     current_post_info["username"] = name_parse_string.get_text().lstrip("u/")
     current_post_info["post_date"] = parse_publication_date(all_a_tags_inside_block[-1])
-    current_post_info["comments_number"] = parse_comment_number(post)
+    current_post_info["comments_number"] = parse_comment_number(post, xpath_templates)
     user_page_url = "".join(["https://www.reddit.com", name_parse_string["href"]])
 
     return user_page_url
+
+
+async def parse_user_page(browser, user_page_url, current_post, logger, xpath_templates):
+    user_profile_info = await get_user_html_from_new_browser_tab(browser, user_page_url, xpath_templates)
+    try:
+        current_post["user_karma"] = user_profile_info.select_one(xpath_templates["user_karma"]).get_text()
+        user_cake_day = dateparser.parse(user_profile_info
+                                         .select_one(xpath_templates["user_cake_day"])
+                                         .get_text())
+
+        current_post["user_cake_day"] = str(user_cake_day.date())
+    except AttributeError:
+        logger.debug(f"Failed to access user(link: {user_page_url}) page due to age limit!")
+
+        return False, current_post
+
+    return True, current_post
 
 
 def navigate_popup_menu(browser, post_id, current_post_info, logger):
@@ -166,12 +182,13 @@ def parse_popup_menu(current_post_info, popup_element):
     current_post_info["comment_karma"] = tags_with_numbers[2].select_one("div").get_text()
 
 
-async def start_user_parsing(browser, source, current_post, logger):
-    return await asyncio.gather(*[parse_user_page(browser, url, value, logger)
+async def start_user_parsing(browser, source, current_post, logger, xpath_templates):
+    return await asyncio.gather(*[parse_user_page(browser, url, value, logger, xpath_templates)
                                   for url, value in zip(source, current_post)])
 
 
-def parse_reddit_page(chrome_drive_path: str, post_count: int, logger: logging.Logger) -> None:
+def parse_reddit_page(chrome_drive_path: str, post_count: int, logger: logging.Logger,
+                      xpath_templates: Dict[str, str]) -> None:
     filename = generate_filename()
     truncate_file_content(filename)
     logger.info(f"The filename: {filename}!")
@@ -185,14 +202,14 @@ def parse_reddit_page(chrome_drive_path: str, post_count: int, logger: logging.L
 
         while len(parsed_information) < post_count:
             current_post_info = {}
-            single_posts = get_posts_list(browser.page_source)
+            single_posts = get_posts_list(browser.page_source, xpath_templates)
             post = single_posts[total_posts_count]
             post_id = post["id"]
 
             current_post = browser.find_element_by_id(post_id)
             hover_current_post_element(browser, current_post)
 
-            user_page_url = parse_main_page(current_post_info, post, post_id, logger)
+            user_page_url = parse_main_page(current_post_info, post, post_id, logger, xpath_templates)
             if user_page_url is None:
                 total_posts_count += 1
                 continue
@@ -206,7 +223,7 @@ def parse_reddit_page(chrome_drive_path: str, post_count: int, logger: logging.L
             addition_counter += 1
             user_source.append(user_page_url), saved_dicts.append(current_post_info)
             if addition_counter == 10:
-                result = asyncio.run(start_user_parsing(browser, user_source, saved_dicts, logger))
+                result = asyncio.run(start_user_parsing(browser, user_source, saved_dicts, logger, xpath_templates))
                 true_results = 0
                 for return_value, saved_dictionary in result:
                     if return_value is True:
@@ -227,23 +244,6 @@ def parse_reddit_page(chrome_drive_path: str, post_count: int, logger: logging.L
         browser.quit()
 
 
-async def parse_user_page(browser, user_page_url, current_post, logger):
-    user_profile_info = await get_user_html_from_new_browser_tab(browser, user_page_url)
-    try:
-        current_post["user_karma"] = user_profile_info.select_one("div > div > span").get_text()
-        user_cake_day = dateparser.parse(user_profile_info
-                                         .select_one("div:nth-of-type(2) > div > span")
-                                         .get_text())
-
-        current_post["user_cake_day"] = str(user_cake_day.date())
-    except AttributeError:
-        logger.debug(f"Failed to access user(link: {user_page_url}) page due to age limit!")
-
-        return False, current_post
-
-    return True, current_post
-
-
 def parse_command_line_arguments() -> Tuple[str, str, int]:
     argument_parser = argparse.ArgumentParser(description="Reddit parser")
     argument_parser.add_argument("--path", metavar="path", type=str, help="Chromedriver path",
@@ -251,7 +251,7 @@ def parse_command_line_arguments() -> Tuple[str, str, int]:
     argument_parser.add_argument("--log_level", metavar="log_level", type=str, default="DEBUG",
                                  choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                                  help="Minimal logging level('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
-    argument_parser.add_argument("--post_count", metavar="post_count", type=int, default=20,
+    argument_parser.add_argument("--post_count", metavar="post_count", type=int, default=7,
                                  choices=range(0, 101), help="Parsed post count")
     args = argument_parser.parse_args()
 
@@ -270,14 +270,21 @@ def find_chrome_driver() -> str:
     return stream.read().rstrip(os.linesep)
 
 
+def load_xpath_templates_from_json():
+    with open('xpath_config.json') as json_file:
+        xpath_templates = json.load(json_file)
+
+    return xpath_templates
+
+
 if __name__ == "__main__":
-    import time
     chrome_driver, min_log_level, max_post_count = parse_command_line_arguments()
     configured_logger = config_logger(string_to_logging_level(min_log_level))
+    xpath = load_xpath_templates_from_json()
 
     if os.path.isfile(chrome_driver):
         start = time.time()
-        parse_reddit_page(chrome_driver, max_post_count, configured_logger)
+        parse_reddit_page(chrome_driver, max_post_count, configured_logger, xpath)
         print(time.time() - start, " seconds.")
     else:
         configured_logger.error(f"Chrome drive does not exists at this link: {chrome_driver}!")
