@@ -235,7 +235,7 @@ def parse_command_line_arguments() -> Tuple[str, str, int]:
     argument_parser.add_argument("--log_level", metavar="log_level", type=str, default="CRITICAL",
                                  choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                                  help="Minimal logging level('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
-    argument_parser.add_argument("--post_count", metavar="post_count", type=int, default=20,
+    argument_parser.add_argument("--post_count", metavar="post_count", type=int, default=35,
                                  choices=range(0, 101), help="Parsed post count")
     args = argument_parser.parse_args()
 
