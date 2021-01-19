@@ -1,7 +1,9 @@
+import asyncio
 import os
 import uuid
 import time
 import json
+import aiohttp
 import logging
 import argparse
 import dateparser
@@ -26,7 +28,7 @@ def serialize_output_string(parsed_data: Dict[str, str]) -> str:
     sequence = ["post_url", "username", "user_karma", "user_cake_day", "post_karma", "comment_karma",
                 "post_date", "comments_number", "votes_number", "post_category"]
 
-    output_string = str(uuid.uuid1().hex)
+    output_string = generate_uuid()
     for field in sequence:
         output_string = ";".join([output_string, parsed_data[field]])
 
@@ -42,7 +44,11 @@ def config_browser(chrome_drive_path: str) -> webdriver.Chrome:
     options.add_argument('--blink-settings=imagesEnabled=false')
     options.add_argument('--no-proxy-server')
 
-    return webdriver.Chrome(chrome_drive_path, chrome_options=options, desired_capabilities=caps)
+    return webdriver.Chrome(chrome_drive_path, options=options, desired_capabilities=caps)
+
+
+def generate_uuid():
+    return str(uuid.uuid1().hex)
 
 
 def generate_filename() -> str:
@@ -213,7 +219,8 @@ def parse_reddit_page(chrome_drive_path: str, post_count: int, logger: logging.L
             total_posts_count += 1
             user_profile_info = get_user_html_from_new_browser_tab(browser, user_page_url, xpath_templates)
             if parse_user_page(user_profile_info, user_page_url, current_post_info, logger, xpath_templates):
-                parsed_information.append(serialize_output_string(current_post_info))
+                current_post_info["unique_id"] = generate_uuid()
+                parsed_information.append(current_post_info)
                 logger.debug(f"All information has been received on this post(url: {current_post_info['post_url']})")
                 parsed_post_count += 1
             else:
@@ -224,8 +231,27 @@ def parse_reddit_page(chrome_drive_path: str, post_count: int, logger: logging.L
     except Exception as exception:
         logger.error(exception, exc_info=True)
     finally:
-        write_to_file(filename, parsed_information)
         browser.quit()
+        loop = asyncio.get_event_loop()
+        future = asyncio.ensure_future(start_sending(parsed_information))
+        loop.run_until_complete(future)
+
+
+async def send_data(url, session, post):
+    async with session.post(url, data=json.dumps(post).encode("utf-8")) as response:
+        return await response.read()
+
+
+async def start_sending(parsed_information):
+    url = "http://localhost:8087/posts/"
+    tasks = []
+
+    async with aiohttp.ClientSession() as session:
+        for post in parsed_information:
+            task = asyncio.ensure_future(send_data(url, session, post))
+            tasks.append(task)
+
+        await asyncio.gather(*tasks)
 
 
 def parse_command_line_arguments() -> Tuple[str, str, int]:
@@ -235,7 +261,7 @@ def parse_command_line_arguments() -> Tuple[str, str, int]:
     argument_parser.add_argument("--log_level", metavar="log_level", type=str, default="CRITICAL",
                                  choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                                  help="Minimal logging level('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
-    argument_parser.add_argument("--post_count", metavar="post_count", type=int, default=35,
+    argument_parser.add_argument("--post_count", metavar="post_count", type=int, default=20,
                                  choices=range(0, 101), help="Parsed post count")
     args = argument_parser.parse_args()
 
