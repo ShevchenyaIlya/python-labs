@@ -3,8 +3,8 @@ import os
 import uuid
 import logging
 import argparse
+import aiohttp
 import dateparser
-import lxml
 import json
 import time
 from typing import List, Dict, Tuple
@@ -24,11 +24,15 @@ def write_to_file(filename: str, data: List[str]) -> None:
             file.write(f"{serialize_post}{os.linesep}")
 
 
+def generate_uuid():
+    return str(uuid.uuid1().hex)
+
+
 def serialize_output_string(parsed_data: Dict[str, str]) -> str:
     sequence = ["post_url", "username", "user_karma", "user_cake_day", "post_karma", "comment_karma",
                 "post_date", "comments_number", "votes_number", "post_category"]
 
-    output_string = str(uuid.uuid1().hex)
+    output_string = generate_uuid()
     for field in sequence:
         output_string = ";".join([output_string, parsed_data[field]])
 
@@ -228,7 +232,8 @@ def parse_reddit_page(chrome_drive_path: str, post_count: int, logger: logging.L
                 for return_value, saved_dictionary in result:
                     if return_value is True:
                         true_results += 1
-                        parsed_information.append(serialize_output_string(saved_dictionary))
+                        saved_dictionary["unique_id"] = generate_uuid()
+                        parsed_information.append(saved_dictionary)
                         logger.debug(
                             f"All information has been received on this post(url: {saved_dictionary['post_url']})")
                 user_source.clear(), saved_dicts.clear()
@@ -240,8 +245,25 @@ def parse_reddit_page(chrome_drive_path: str, post_count: int, logger: logging.L
     except Exception as exception:
         logger.error(exception, exc_info=True)
     finally:
-        write_to_file(filename, parsed_information[:post_count])
         browser.quit()
+        asyncio.run(start_sending(parsed_information[:post_count]))
+
+
+async def send_data(url, session, post):
+    async with session.post(url, data=json.dumps(post).encode("utf-8")) as response:
+        return await response.read()
+
+
+async def start_sending(parsed_information):
+    url = "http://localhost:8087/posts/"
+    tasks = []
+
+    async with aiohttp.ClientSession() as session:
+        for post in parsed_information:
+            task = asyncio.ensure_future(send_data(url, session, post))
+            tasks.append(task)
+
+        await asyncio.gather(*tasks)
 
 
 def parse_command_line_arguments() -> Tuple[str, str, int]:
@@ -251,7 +273,7 @@ def parse_command_line_arguments() -> Tuple[str, str, int]:
     argument_parser.add_argument("--log_level", metavar="log_level", type=str, default="DEBUG",
                                  choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                                  help="Minimal logging level('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
-    argument_parser.add_argument("--post_count", metavar="post_count", type=int, default=7,
+    argument_parser.add_argument("--post_count", metavar="post_count", type=int, default=20,
                                  choices=range(0, 101), help="Parsed post count")
     args = argument_parser.parse_args()
 
