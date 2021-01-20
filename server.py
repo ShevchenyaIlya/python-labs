@@ -23,9 +23,7 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
                     self.wfile.write(json.dumps(deserialize_post_data(post)).encode("utf-8"))
                     return
             else:
-                start = time.time()
                 file_content = get_all_posts(filename)
-                print(time.time() - start)
                 self._set_response(200, "OK")
                 self.wfile.write(json.dumps(file_content).encode("utf-8"))
                 return
@@ -109,9 +107,7 @@ def delete_post(filename: str, unique_id: str) -> bool:
     if post_exist_in_file(filename, unique_id):
         all_posts = read_all_posts(filename)
         with open(filename, "w") as file:
-            for post in all_posts:
-                if unique_id not in post:
-                    file.write(post)
+            file.writelines([post for post in all_posts if unique_id not in post])
 
         return True
 
@@ -122,11 +118,10 @@ def modify_post(filename: str, unique_id: str, post_data: dict) -> bool:
     if post_exist_in_file(filename, unique_id):
         all_posts = read_all_posts(filename)
         with open(filename, "w") as file:
-            for post in all_posts:
-                if unique_id in post:
-                    file.write(serialize_post_data(unique_id, post_data))
-                else:
-                    file.write(post)
+            file.writelines(
+                [f"{serialize_post_data(unique_id, post_data)}{os.linesep}" if unique_id in post else post
+                 for post in all_posts]
+            )
 
         return True
 
@@ -156,14 +151,12 @@ def create_file(filename: str) -> None:
 
 def get_line_number(filename: str) -> int:
     with open(filename, "r") as file:
-        return sum(1 for _ in file)
+        return len(file.readlines())
 
 
 def read_all_posts(filename: str) -> list:
     with open(filename, "r") as file:
-        all_posts = file.readlines()
-
-    return all_posts
+        return file.readlines()
 
 
 def get_post_information_sequence() -> list:
@@ -199,10 +192,7 @@ def save_post_to_file(filename: str, parsed_post_data: str) -> None:
 
 def post_exist_in_file(filename: str, unique_id: str) -> bool:
     with open(filename, "r") as file:
-        if unique_id in file.read():
-            return True
-
-    return False
+        return unique_id in file.read()
 
 
 def run_server(port, server_class=ThreadingHTTPServer, handler_class=CustomHTTPRequestHandler):
