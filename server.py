@@ -46,13 +46,13 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
         else:
             self._set_response(404, "Not Found")
 
-    def get_all_posts_request(self):
+    def get_all_posts_request(self) -> None:
         filename = generate_filename()
         file_content = get_all_posts(filename)
         self._set_response(200, "OK")
         self.wfile.write(json.dumps(file_content).encode("utf-8"))
 
-    def get_single_post_request(self):
+    def get_single_post_request(self) -> None:
         filename = generate_filename()
         unique_id = parse_url_path(self.path)[1]
         post = get_single_post(filename, unique_id)
@@ -60,11 +60,10 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
         if post is not None:
             self._set_response(200, "OK")
             self.wfile.write(json.dumps(deserialize_post_data(post)).encode("utf-8"))
-            return True
         else:
             self._set_response(404, "Not Found")
 
-    def post_request(self, post_data):
+    def post_request(self, post_data: dict) -> None:
         filename = generate_filename()
         if not file_exist(filename):
             create_file(filename)
@@ -79,7 +78,7 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
         else:
             self._set_response(200, "OK")
 
-    def delete_request(self):
+    def delete_request(self) -> None:
         filename = generate_filename()
         unique_id = parse_url_path(self.path)[1]
         if delete_post(filename, unique_id):
@@ -87,7 +86,7 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
         else:
             self._set_response(205, "No Content")
 
-    def put_request(self, post_data, unique_id):
+    def put_request(self, post_data: dict) -> None:
         filename = generate_filename()
         unique_id = parse_url_path(self.path)[1]
         if modify_post(filename, unique_id, post_data):
@@ -95,7 +94,7 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
         else:
             self._set_response(205, "No Content")
 
-    def request_handler(self, uri):
+    def request_handler(self, uri: str):
         possible_endpoints = {
             r"GET /posts/?": self.get_all_posts_request,
             r"GET /posts/.*/?": self.get_single_post_request,
