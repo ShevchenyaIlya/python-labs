@@ -239,7 +239,7 @@ def parse_reddit_page(chrome_drive_path: str, post_count: int, logger: logging.L
 
 async def send_data(url, session, post):
     async with session.post(url, data=json.dumps(post).encode("utf-8")) as response:
-        return await response.read()
+        return await response.read(), response.status
 
 
 async def start_sending(parsed_information):
