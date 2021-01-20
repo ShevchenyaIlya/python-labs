@@ -2,6 +2,7 @@ import argparse
 import os
 import json
 import logging
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime
 
@@ -22,7 +23,9 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
                     self.wfile.write(json.dumps(deserialize_post_data(post)).encode("utf-8"))
                     return
             else:
+                start = time.time()
                 file_content = get_all_posts(filename)
+                print(time.time() - start)
                 self._set_response(200, "OK")
                 self.wfile.write(json.dumps(file_content).encode("utf-8"))
                 return
@@ -51,12 +54,11 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
         self._set_response(200, "OK")
 
     def do_DELETE(self) -> None:
+        path = parse_url_path(self.path)
         logging.info(f"DELETE request, Path: {self.path}")
 
-        path = parse_url_path(self.path)
-        if path[0] == "posts" and len(path) == 2:
-            unique_id = path[1]
-            filename = generate_filename()
+        if len(path) == 2 and path[0] == "posts":
+            unique_id, filename = path[1], generate_filename()
             if delete_post(filename, unique_id):
                 self._set_response(200, "OK")
                 return
@@ -68,9 +70,8 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
         post_data = self._get_request_body()
         logging.info(f"PUT request, Path: {str(self.path)}, Body: {post_data}")
 
-        if path_components[0] == "posts" and len(path_components) == 2:
-            unique_id = path_components[1]
-            filename = generate_filename()
+        if len(path_components) == 2 and path_components[0] == "posts":
+            unique_id, filename = path_components[1], generate_filename()
             if modify_post(filename, unique_id, post_data):
                 self._set_response(200, "OK")
                 return
@@ -101,12 +102,7 @@ def get_single_post(filename: str, unique_id: str) -> str or None:
 
 
 def get_all_posts(filename: str) -> list:
-    file_content = []
-    with open(filename, "r") as file:
-        for line in file:
-            file_content.append(deserialize_post_data(line))
-
-    return file_content
+    return [deserialize_post_data(post) for post in read_all_posts(filename)]
 
 
 def delete_post(filename: str, unique_id: str) -> bool:
