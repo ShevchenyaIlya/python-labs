@@ -1,80 +1,110 @@
 import argparse
 import os
+import re
 import json
 import logging
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime
 
 
 class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
-        path_components = parse_url_path(self.path)
-        path_components_len = len(path_components)
         logging.info(f"GET request, Path: {self.path}")
+        get_method = self.request_handler(create_uri(self.command, self.path))
 
-        if 0 < path_components_len <= 2 and path_components[0] == "posts":
-            filename = generate_filename()
-            if path_components_len == 2:
-                unique_id = path_components[1]
-                post = get_single_post(filename, unique_id)
-                if post is not None:
-                    self._set_response(200, "OK")
-                    self.wfile.write(json.dumps(deserialize_post_data(post)).encode("utf-8"))
-                    return
-            else:
-                file_content = get_all_posts(filename)
-                self._set_response(200, "OK")
-                self.wfile.write(json.dumps(file_content).encode("utf-8"))
-                return
-
-        self._set_response(404, "Not Found")
+        if get_method:
+            get_method()
+        else:
+            self._set_response(404, "Not Found")
 
     def do_POST(self) -> None:
-        path_components = parse_url_path(self.path)
         post_data = self._get_request_body()
         logging.info(f"POST request, Path: {str(self.path)}, Body: {post_data}")
+        post_method = self.request_handler(create_uri(self.command, self.path))
 
-        if len(path_components) == 1 and path_components[0] == "posts":
-            filename = generate_filename()
-            if not file_exist(filename):
-                create_file(filename)
-                logging.info(f"File created(name: {filename})")
-
-            unique_id = post_data["unique_id"]
-            if not post_exist_in_file(filename, unique_id):
-                save_post_to_file(filename, serialize_post_data(unique_id, post_data))
-                line_number = get_line_number(filename)
-                self._set_response(201, "Created")
-                self.wfile.write(json.dumps({unique_id: line_number}).encode("utf-8"))
-                return
-
-        self._set_response(200, "OK")
+        if post_method:
+            post_method(post_data)
+        else:
+            self._set_response(200, "OK")
 
     def do_DELETE(self) -> None:
-        path = parse_url_path(self.path)
         logging.info(f"DELETE request, Path: {self.path}")
+        delete_method = self.request_handler(create_uri(self.command, self.path))
 
-        if len(path) == 2 and path[0] == "posts":
-            unique_id, filename = path[1], generate_filename()
-            if delete_post(filename, unique_id):
-                self._set_response(200, "OK")
-                return
-
-        self._set_response(404, "Not Found")
+        if delete_method:
+            delete_method()
+        else:
+            self._set_response(404, "Not Found")
 
     def do_PUT(self) -> None:
-        path_components = parse_url_path(self.path)
         post_data = self._get_request_body()
         logging.info(f"PUT request, Path: {str(self.path)}, Body: {post_data}")
+        put_method = self.request_handler(create_uri(self.command, self.path))
 
-        if len(path_components) == 2 and path_components[0] == "posts":
-            unique_id, filename = path_components[1], generate_filename()
-            if modify_post(filename, unique_id, post_data):
-                self._set_response(200, "OK")
-                return
+        if put_method:
+            put_method(post_data)
+        else:
+            self._set_response(404, "Not Found")
 
-        self._set_response(404, "Not Found")
+    def get_all_posts_request(self):
+        filename = generate_filename()
+        file_content = get_all_posts(filename)
+        self._set_response(200, "OK")
+        self.wfile.write(json.dumps(file_content).encode("utf-8"))
+
+    def get_single_post_request(self):
+        filename = generate_filename()
+        unique_id = parse_url_path(self.path)[1]
+        post = get_single_post(filename, unique_id)
+
+        if post is not None:
+            self._set_response(200, "OK")
+            self.wfile.write(json.dumps(deserialize_post_data(post)).encode("utf-8"))
+            return True
+        else:
+            self._set_response(404, "Not Found")
+
+    def post_request(self, post_data):
+        filename = generate_filename()
+        if not file_exist(filename):
+            create_file(filename)
+            logging.info(f"File created(name: {filename})")
+
+        unique_id = post_data["unique_id"]
+        if not post_exist_in_file(filename, unique_id):
+            save_post_to_file(filename, serialize_post_data(unique_id, post_data))
+            line_number = get_line_number(filename)
+            self._set_response(201, "Created")
+            self.wfile.write(json.dumps({unique_id: line_number}).encode("utf-8"))
+        else:
+            self._set_response(200, "OK")
+
+    def delete_request(self):
+        filename = generate_filename()
+        unique_id = parse_url_path(self.path)[1]
+        if delete_post(filename, unique_id):
+            self._set_response(200, "OK")
+        else:
+            self._set_response(205, "No Content")
+
+    def put_request(self, post_data, unique_id):
+        filename = generate_filename()
+        unique_id = parse_url_path(self.path)[1]
+        if modify_post(filename, unique_id, post_data):
+            self._set_response(200, "OK")
+        else:
+            self._set_response(205, "No Content")
+
+    def request_handler(self, uri):
+        possible_endpoints = {
+            r"GET /posts/?": self.get_all_posts_request,
+            r"GET /posts/.*/?": self.get_single_post_request,
+            r"POST /posts/?": self.post_request,
+            r"DELETE /posts/.*/?": self.delete_request,
+            r"PUT /posts/.*/?": self.put_request
+        }
+
+        return find_matches(possible_endpoints, uri)
 
     def _get_request_body(self) -> dict:
         content_length = int(self.headers['Content-Length'])
@@ -87,6 +117,16 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
     def _set_content_type(self) -> None:
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
+
+
+def create_uri(command, path):
+    return " ".join([command, path])
+
+
+def find_matches(possible_endpoints, uri):
+    for key, value in possible_endpoints.items():
+        if re.fullmatch(key, uri):
+            return value
 
 
 def get_single_post(filename: str, unique_id: str) -> str or None:
