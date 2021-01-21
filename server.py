@@ -1,5 +1,4 @@
 import argparse
-import re
 import json
 import logging
 import socketserver
@@ -7,6 +6,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer, HTTPServer
 from typing import Tuple
 
 from cache import Cache
+from logging_converter import string_to_logging_level
+from url_processing import find_matches, create_url, get_unique_id_from_url
 
 
 class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
@@ -24,9 +25,6 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
     def request_handler(self, uri: str):
         return find_matches(self.possible_endpoints, uri)
 
-    def register_endpoint(self, uri, handler):
-        self.possible_endpoints[uri] = handler
-
     def _get_request_body(self) -> dict:
         content_length = int(self.headers['Content-Length'])
         return json.loads(self.rfile.read(content_length).decode("utf-8"))
@@ -43,7 +41,7 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         logging.info(f"GET request, Path: {self.path}")
-        get_method = self.request_handler(create_uri(self.command, self.path))
+        get_method = self.request_handler(create_url(self.command, self.path))
 
         if get_method:
             self._set_response(*get_method())
@@ -53,7 +51,7 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         post_data = self._get_request_body()
         logging.info(f"POST request, Path: {str(self.path)}, Body: {post_data}")
-        post_method = self.request_handler(create_uri(self.command, self.path))
+        post_method = self.request_handler(create_url(self.command, self.path))
 
         if post_method:
             self._set_response(*post_method(post_data))
@@ -62,7 +60,7 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:
         logging.info(f"DELETE request, Path: {self.path}")
-        delete_method = self.request_handler(create_uri(self.command, self.path))
+        delete_method = self.request_handler(create_url(self.command, self.path))
 
         if delete_method:
             self._set_response(*delete_method())
@@ -72,7 +70,7 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_PUT(self) -> None:
         post_data = self._get_request_body()
         logging.info(f"PUT request, Path: {str(self.path)}, Body: {post_data}")
-        put_method = self.request_handler(create_uri(self.command, self.path))
+        put_method = self.request_handler(create_url(self.command, self.path))
 
         if put_method:
             self._set_response(*put_method(post_data))
@@ -84,7 +82,7 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
         return 200, "OK", file_content
 
     def get_single_post_request(self):
-        unique_id = parse_url_path(self.path)[1]
+        unique_id = get_unique_id_from_url(self.path)
         post = self.cache.get_post_by_id(unique_id)
 
         if post is not None:
@@ -102,41 +100,19 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
             return 200, "OK"
 
     def delete_request(self) -> Tuple[int, str]:
-        unique_id = parse_url_path(self.path)[1]
+        unique_id = get_unique_id_from_url(self.path)
         if self.cache.delete(unique_id):
             return 200, "OK"
         else:
             return 205, "No Content"
 
     def put_request(self, post_data: dict) -> Tuple[int, str]:
-        unique_id = parse_url_path(self.path)[1]
+        unique_id = get_unique_id_from_url(self.path)
         if self.cache.get_post_by_id(unique_id):
             self.cache.modify(unique_id, post_data)
             return 200, "OK"
         else:
             return 205, "No Content"
-
-
-def create_uri(command, path):
-    return " ".join([command, path])
-
-
-def find_matches(possible_endpoints, uri):
-    for key, value in possible_endpoints.items():
-        if re.fullmatch(key, uri):
-            return value
-
-
-def parse_url_path(path: str) -> list:
-    """Return list of path components that were divided by '/'"""
-    return list(filter(None, path.split("/")))
-
-
-def string_to_logging_level(log_level: str) -> int:
-    possible_levels = {'DEBUG': logging.DEBUG, 'INFO': logging.INFO, 'WARNING': logging.WARNING,
-                       'ERROR': logging.ERROR, 'CRITICAL': logging.CRITICAL}
-
-    return possible_levels[log_level]
 
 
 def parse_command_line_arguments() -> tuple:
@@ -159,8 +135,8 @@ def run_server(port, server_class=CachedThreadingHTTPServer, handler_class=Custo
     server_address = ('', port)
     httpd = server_class(server_address, handler_class)
     try:
-        httpd.serve_forever()
         logging.info(f"Start server on port {port}")
+        httpd.serve_forever()
     except KeyboardInterrupt as exception:
         logging.error(exception)
     finally:
