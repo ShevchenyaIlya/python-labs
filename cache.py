@@ -1,9 +1,12 @@
-from file_management import get_all_posts, generate_filename
+from datetime import datetime
+
+from file_management import get_all_posts, save_all_posts, generate_filename
 
 
 class Cache:
     def __init__(self):
         self.filename = generate_filename()
+        self.last_backup = datetime.now()
         self._cached_data = {}
 
         self.load_cache()
@@ -13,8 +16,9 @@ class Cache:
         for post in all_posts:
             self._cached_data[post["unique_id"]] = post
 
-    def save_cache(self):
-        pass
+    def backup_cache(self):
+        save_all_posts(self.filename, self._cached_data)
+        self.last_backup = datetime.now()
 
     def get_post_by_id(self, unique_id):
         return self._cached_data.get(unique_id)
