@@ -96,7 +96,6 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
         unique_id = post_data["unique_id"]
         if not self.cache.get_post_by_id(unique_id):
             self.cache.append(unique_id, post_data)
-            # save_post_to_file(self.cache.filename, serialize_post_data(unique_id, post_data))
             line_number = self.cache.cache_size()
             return 201, "Created", {unique_id: line_number}
         else:
@@ -105,7 +104,6 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
     def delete_request(self) -> Tuple[int, str]:
         unique_id = parse_url_path(self.path)[1]
         if self.cache.delete(unique_id):
-            # delete_post(self.cache.filename, unique_id)
             return 200, "OK"
         else:
             return 205, "No Content"
@@ -114,7 +112,6 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
         unique_id = parse_url_path(self.path)[1]
         if self.cache.get_post_by_id(unique_id):
             self.cache.modify(unique_id, post_data)
-            # modify_post(filename, unique_id, post_data)
             return 200, "OK"
         else:
             return 205, "No Content"
