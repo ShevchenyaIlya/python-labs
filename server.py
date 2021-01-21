@@ -14,51 +14,14 @@ from file_management import (get_single_post, get_all_posts, delete_post, modify
 class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         self.possible_endpoints = {
-            r"GET /posts/?": get_all_posts_request,
-            r"GET /posts/.*/?": get_single_post_request,
-            r"POST /posts/?": post_request,
-            r"DELETE /posts/.*/?": delete_request,
-            r"PUT /posts/.*/?": put_request
+            r"GET /posts/?": self.get_all_posts_request,
+            r"GET /posts/.{32}/?": self.get_single_post_request,
+            r"POST /posts/?": self.post_request,
+            r"DELETE /posts/.{32}/?": self.delete_request,
+            r"PUT /posts/.{32}/?": self.put_request
         }
+        self.cache = Cache()
         super().__init__(*args, **kwargs)
-
-    def do_GET(self) -> None:
-        logging.info(f"GET request, Path: {self.path}")
-        get_method = self.request_handler(create_uri(self.command, self.path))
-
-        if get_method:
-            self._set_response(*get_method(self.path))
-        else:
-            self._set_response(404, "Not Found")
-
-    def do_POST(self) -> None:
-        post_data = self._get_request_body()
-        logging.info(f"POST request, Path: {str(self.path)}, Body: {post_data}")
-        post_method = self.request_handler(create_uri(self.command, self.path))
-
-        if post_method:
-            self._set_response(*post_method(post_data))
-        else:
-            self._set_response(200, "OK")
-
-    def do_DELETE(self) -> None:
-        logging.info(f"DELETE request, Path: {self.path}")
-        delete_method = self.request_handler(create_uri(self.command, self.path))
-
-        if delete_method:
-            self._set_response(*delete_method(self.path))
-        else:
-            self._set_response(404, "Not Found")
-
-    def do_PUT(self) -> None:
-        post_data = self._get_request_body()
-        logging.info(f"PUT request, Path: {str(self.path)}, Body: {post_data}")
-        put_method = self.request_handler(create_uri(self.command, self.path))
-
-        if put_method:
-            self._set_response(*put_method(self.path, post_data))
-        else:
-            self._set_response(404, "Not Found")
 
     def request_handler(self, uri: str):
         return find_matches(self.possible_endpoints, uri)
@@ -80,55 +43,84 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
 
+    def do_GET(self) -> None:
+        logging.info(f"GET request, Path: {self.path}")
+        get_method = self.request_handler(create_uri(self.command, self.path))
 
-def get_all_posts_request(path: str) -> Tuple[int, str, list]:
-    filename = generate_filename()
-    file_content = get_all_posts(filename)
-    return 200, "OK", file_content
+        if get_method:
+            self._set_response(*get_method())
+        else:
+            self._set_response(404, "Not Found")
 
+    def do_POST(self) -> None:
+        post_data = self._get_request_body()
+        logging.info(f"POST request, Path: {str(self.path)}, Body: {post_data}")
+        post_method = self.request_handler(create_uri(self.command, self.path))
 
-def get_single_post_request(path: str):
-    filename = generate_filename()
-    unique_id = parse_url_path(path)[1]
-    post = get_single_post(filename, unique_id)
+        if post_method:
+            self._set_response(*post_method(post_data))
+        else:
+            self._set_response(200, "OK")
 
-    if post is not None:
-        return 200, "OK", deserialize_post_data(post)
-    else:
-        return 404, "Not Found"
+    def do_DELETE(self) -> None:
+        logging.info(f"DELETE request, Path: {self.path}")
+        delete_method = self.request_handler(create_uri(self.command, self.path))
 
+        if delete_method:
+            self._set_response(*delete_method())
+        else:
+            self._set_response(404, "Not Found")
 
-def post_request(post_data: dict):
-    filename = generate_filename()
-    if not file_exist(filename):
-        create_file(filename)
-        logging.info(f"File created(name: {filename})")
+    def do_PUT(self) -> None:
+        post_data = self._get_request_body()
+        logging.info(f"PUT request, Path: {str(self.path)}, Body: {post_data}")
+        put_method = self.request_handler(create_uri(self.command, self.path))
 
-    unique_id = post_data["unique_id"]
-    if not post_exist_in_file(filename, unique_id):
-        save_post_to_file(filename, serialize_post_data(unique_id, post_data))
-        line_number = get_line_number(filename)
-        return 201, "Created", {unique_id: line_number}
-    else:
-        return 200, "OK"
+        if put_method:
+            self._set_response(*put_method(post_data))
+        else:
+            self._set_response(404, "Not Found")
 
+    def get_all_posts_request(self) -> Tuple[int, str, list]:
+        file_content = self.cache.get_all_posts()
+        return 200, "OK", file_content
 
-def delete_request(path) -> Tuple[int, str]:
-    filename = generate_filename()
-    unique_id = parse_url_path(path)[1]
-    if delete_post(filename, unique_id):
-        return 200, "OK"
-    else:
-        return 205, "No Content"
+    def get_single_post_request(self):
+        unique_id = parse_url_path(self.path)[1]
+        post = self.cache.get_post_by_id(unique_id)
 
+        if post is not None:
+            return 200, "OK", post
+        else:
+            return 404, "Not Found"
 
-def put_request(path: str, post_data: dict) -> Tuple[int, str]:
-    filename = generate_filename()
-    unique_id = parse_url_path(path)[1]
-    if modify_post(filename, unique_id, post_data):
-        return 200, "OK"
-    else:
-        return 205, "No Content"
+    def post_request(self, post_data: dict):
+        unique_id = post_data["unique_id"]
+        if not self.cache.get_post_by_id(unique_id):
+            self.cache.append(unique_id, post_data)
+            save_post_to_file(self.cache.filename, serialize_post_data(unique_id, post_data))
+            line_number = self.cache.cache_size()
+            return 201, "Created", {unique_id: line_number}
+        else:
+            return 200, "OK"
+
+    def delete_request(self) -> Tuple[int, str]:
+        unique_id = parse_url_path(self.path)[1]
+        if self.cache.delete(unique_id):
+            delete_post(self.cache.filename, unique_id)
+            return 200, "OK"
+        else:
+            return 205, "No Content"
+
+    def put_request(self, post_data: dict) -> Tuple[int, str]:
+        filename = generate_filename()
+        unique_id = parse_url_path(self.path)[1]
+        if self.cache.get_post_by_id(unique_id):
+            self.cache.modify(unique_id, post_data)
+            modify_post(filename, unique_id, post_data)
+            return 200, "OK"
+        else:
+            return 205, "No Content"
 
 
 def create_uri(command, path):
