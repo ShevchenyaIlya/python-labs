@@ -2,13 +2,11 @@ import argparse
 import re
 import json
 import logging
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import socketserver
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer, HTTPServer
 from typing import Tuple
 
 from cache import Cache
-from file_management import (get_single_post, get_all_posts, delete_post, modify_post, generate_filename,
-                             file_exist, create_file, get_line_number, save_post_to_file,
-                             post_exist_in_file, serialize_post_data, deserialize_post_data)
 
 
 class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
@@ -20,7 +18,7 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
             r"DELETE /posts/.{32}/?": self.delete_request,
             r"PUT /posts/.{32}/?": self.put_request
         }
-        self.cache = Cache()
+        self.cache = args[-1].cache
         super().__init__(*args, **kwargs)
 
     def request_handler(self, uri: str):
@@ -98,7 +96,7 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
         unique_id = post_data["unique_id"]
         if not self.cache.get_post_by_id(unique_id):
             self.cache.append(unique_id, post_data)
-            save_post_to_file(self.cache.filename, serialize_post_data(unique_id, post_data))
+            # save_post_to_file(self.cache.filename, serialize_post_data(unique_id, post_data))
             line_number = self.cache.cache_size()
             return 201, "Created", {unique_id: line_number}
         else:
@@ -107,17 +105,16 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
     def delete_request(self) -> Tuple[int, str]:
         unique_id = parse_url_path(self.path)[1]
         if self.cache.delete(unique_id):
-            delete_post(self.cache.filename, unique_id)
+            # delete_post(self.cache.filename, unique_id)
             return 200, "OK"
         else:
             return 205, "No Content"
 
     def put_request(self, post_data: dict) -> Tuple[int, str]:
-        filename = generate_filename()
         unique_id = parse_url_path(self.path)[1]
         if self.cache.get_post_by_id(unique_id):
             self.cache.modify(unique_id, post_data)
-            modify_post(filename, unique_id, post_data)
+            # modify_post(filename, unique_id, post_data)
             return 200, "OK"
         else:
             return 205, "No Content"
@@ -156,7 +153,12 @@ def parse_command_line_arguments() -> tuple:
     return args.port, args.log_level
 
 
-def run_server(port, server_class=ThreadingHTTPServer, handler_class=CustomHTTPRequestHandler):
+class CachedThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+    cache = Cache()
+
+
+def run_server(port, server_class=CachedThreadingHTTPServer, handler_class=CustomHTTPRequestHandler):
     server_address = ('', port)
     httpd = server_class(server_address, handler_class)
     try:
@@ -166,6 +168,7 @@ def run_server(port, server_class=ThreadingHTTPServer, handler_class=CustomHTTPR
         logging.error(exception)
     finally:
         httpd.server_close()
+        httpd.cache.backup_cache()
         logging.info(f"Server closed on port {port}")
 
 
