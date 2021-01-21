@@ -3,22 +3,25 @@ from datetime import datetime
 from file_management import get_all_posts, save_all_posts, generate_filename
 
 
+def check_backup(function):
+    def inner_function(self, *args):
+        if datetime_difference(self._last_backup, datetime.now()) > self._backup_period:
+            self.backup_cache()
+
+        return function(self, *args)
+
+    return inner_function
+
+
 class Cache:
     def __init__(self):
         self.filename = generate_filename()
         self._last_backup = datetime.now()
-        self._backup_period = 10
+        self._backup_period = 2
         self._cache_modified = False
         self._cached_data = {}
 
         self.load_cache()
-
-    def __getattribute__(self, item):
-        possible_names = ["get_post_by_id", "get_all_posts", "append", "delete", "modify"]
-        if item in possible_names:
-            self._check_backup()
-
-        return object.__getattribute__(self, item)
 
     def load_cache(self):
         all_posts = get_all_posts(self.filename)
@@ -31,16 +34,20 @@ class Cache:
             self._last_backup = datetime.now()
             self._cache_modified = False
 
+    @check_backup
     def get_post_by_id(self, unique_id):
         return self._cached_data.get(unique_id)
 
+    @check_backup
     def get_all_posts(self):
         return list(self._cached_data.values())
 
+    @check_backup
     def append(self, unique_id, post):
         self._cached_data[unique_id] = post
         self._cache_modified = True
 
+    @check_backup
     def delete(self, unique_id):
         post = self._cached_data.pop(unique_id, None)
         if not post:
@@ -48,16 +55,13 @@ class Cache:
 
         return post
 
+    @check_backup
     def modify(self, unique_id, post):
         self._cached_data[unique_id] = post
         self._cache_modified = True
 
     def cache_size(self):
         return len(self._cached_data)
-
-    def _check_backup(self):
-        if datetime_difference(self._last_backup, datetime.now()) > self._backup_period:
-            self.backup_cache()
 
 
 def datetime_difference(first_date, second_date):
