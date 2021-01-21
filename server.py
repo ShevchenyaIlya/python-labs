@@ -6,7 +6,7 @@ from typing import Tuple
 
 from cache import Cache
 from logging_converter import string_to_logging_level
-from url_processing import find_matches, create_url, get_unique_id_from_url
+from url_processing import find_matches, get_unique_id_from_url
 
 
 class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
@@ -14,16 +14,17 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def __init__(self, *args, **kwargs):
         self.possible_endpoints = {
-            r"GET /posts/?": self.get_all_posts_request,
-            r"GET /posts/.{32}/?": self.get_single_post_request,
-            r"POST /posts/?": self.post_request,
-            r"DELETE /posts/.{32}/?": self.delete_request,
-            r"PUT /posts/.{32}/?": self.put_request
+            ("GET", r"/posts/?"): self.get_all_posts_request,
+            ("GET", r"/posts/.{32}/?"): self.get_single_post_request,
+            ("POST", r"/posts/?"): self.post_request,
+            ("DELETE", r"/posts/.{32}/?"): self.delete_request,
+            ("PUT", r"/posts/.{32}/?"): self.put_request
         }
         super().__init__(*args, **kwargs)
 
-    def request_handler(self, uri: str):
-        return find_matches(self.possible_endpoints, uri)
+    def request_handler(self, command: str, uri: str):
+        possible_endpoint = list(filter(lambda key: key[0] == command, self.possible_endpoints))
+        return self.possible_endpoints.get(find_matches(possible_endpoint, uri))
 
     def _get_request_body(self) -> dict:
         content_length = int(self.headers['Content-Length'])
@@ -41,7 +42,7 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         logging.info(f"GET request, Path: {self.path}")
-        get_method = self.request_handler(create_url(self.command, self.path))
+        get_method = self.request_handler(self.command, self.path)
 
         if get_method:
             self._set_response(*get_method())
@@ -51,7 +52,7 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         post_data = self._get_request_body()
         logging.info(f"POST request, Path: {str(self.path)}, Body: {post_data}")
-        post_method = self.request_handler(create_url(self.command, self.path))
+        post_method = self.request_handler(self.command, self.path)
 
         if post_method:
             self._set_response(*post_method(post_data))
@@ -60,7 +61,7 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:
         logging.info(f"DELETE request, Path: {self.path}")
-        delete_method = self.request_handler(create_url(self.command, self.path))
+        delete_method = self.request_handler(self.command, self.path)
 
         if delete_method:
             self._set_response(*delete_method())
@@ -70,7 +71,7 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_PUT(self) -> None:
         post_data = self._get_request_body()
         logging.info(f"PUT request, Path: {str(self.path)}, Body: {post_data}")
-        put_method = self.request_handler(create_url(self.command, self.path))
+        put_method = self.request_handler(self.command, self.path)
 
         if put_method:
             self._set_response(*put_method(post_data))
