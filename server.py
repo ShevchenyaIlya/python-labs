@@ -1,8 +1,7 @@
 import argparse
 import json
 import logging
-import socketserver
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Tuple
 
 from cache import Cache
@@ -11,6 +10,8 @@ from url_processing import find_matches, create_url, get_unique_id_from_url
 
 
 class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
+    cache = Cache()
+
     def __init__(self, *args, **kwargs):
         self.possible_endpoints = {
             r"GET /posts/?": self.get_all_posts_request,
@@ -19,7 +20,6 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
             r"DELETE /posts/.{32}/?": self.delete_request,
             r"PUT /posts/.{32}/?": self.put_request
         }
-        self.cache = args[-1].cache
         super().__init__(*args, **kwargs)
 
     def request_handler(self, uri: str):
@@ -115,11 +115,6 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
             return 205, "No Content"
 
 
-class CachedThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
-    daemon_threads = True
-    cache = Cache()
-
-
 def parse_command_line_arguments() -> tuple:
     argument_parser = argparse.ArgumentParser(description="Simple http server")
     argument_parser.add_argument("--port", metavar="port", type=int, default=8087)
@@ -131,7 +126,7 @@ def parse_command_line_arguments() -> tuple:
     return args.port, args.log_level
 
 
-def run_server(port, server_class=CachedThreadingHTTPServer, handler_class=CustomHTTPRequestHandler):
+def run_server(port, server_class=ThreadingHTTPServer, handler_class=CustomHTTPRequestHandler):
     server_address = ('', port)
     httpd = server_class(server_address, handler_class)
     try:
@@ -141,7 +136,7 @@ def run_server(port, server_class=CachedThreadingHTTPServer, handler_class=Custo
         logging.error(exception)
     finally:
         httpd.server_close()
-        httpd.cache.backup_cache()
+        httpd.RequestHandlerClass.cache.backup_cache()
         logging.info(f"Server closed on port {port}")
 
 
