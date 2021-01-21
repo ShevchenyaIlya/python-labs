@@ -4,3 +4,4 @@
 /geckodriver.log
 /reddit-*
 /venv/
+/__pycache__/
