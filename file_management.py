@@ -16,6 +16,13 @@ def get_all_posts(filename: str) -> list:
     return [deserialize_post_data(post) for post in read_all_posts(filename)]
 
 
+def save_all_posts(filename: str, all_posts: dict):
+    with open(filename, "w") as file:
+        file.writelines(
+            [f"{serialize_post_data(unique_id, post)}{os.linesep}" for unique_id, post in all_posts.items()]
+        )
+
+
 def delete_post(filename: str, unique_id: str) -> bool:
     if post_exist_in_file(filename, unique_id):
         all_posts = read_all_posts(filename)
