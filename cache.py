@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from file_management import get_all_posts, save_all_posts, generate_filename
 
@@ -7,10 +7,18 @@ class Cache:
     def __init__(self):
         self.filename = generate_filename()
         self._last_backup = datetime.now()
+        self._backup_period = 10
         self._cache_modified = False
         self._cached_data = {}
 
         self.load_cache()
+
+    def __getattribute__(self, item):
+        possible_names = ["get_post_by_id", "get_all_posts", "append", "delete", "modify"]
+        if item in possible_names:
+            self._check_backup()
+
+        return object.__getattribute__(self, item)
 
     def load_cache(self):
         all_posts = get_all_posts(self.filename)
@@ -46,6 +54,10 @@ class Cache:
 
     def cache_size(self):
         return len(self._cached_data)
+
+    def _check_backup(self):
+        if datetime_difference(self._last_backup, datetime.now()) > self._backup_period:
+            self.backup_cache()
 
 
 def datetime_difference(first_date, second_date):
