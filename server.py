@@ -115,6 +115,11 @@ class CustomHTTPRequestHandler(BaseHTTPRequestHandler):
             return 205, "No Content"
 
 
+class CachedThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+    cache = Cache()
+
+
 def parse_command_line_arguments() -> tuple:
     argument_parser = argparse.ArgumentParser(description="Simple http server")
     argument_parser.add_argument("--port", metavar="port", type=int, default=8087)
@@ -124,11 +129,6 @@ def parse_command_line_arguments() -> tuple:
     args = argument_parser.parse_args()
 
     return args.port, args.log_level
-
-
-class CachedThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
-    daemon_threads = True
-    cache = Cache()
 
 
 def run_server(port, server_class=CachedThreadingHTTPServer, handler_class=CustomHTTPRequestHandler):

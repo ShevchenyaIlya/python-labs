@@ -12,5 +12,4 @@ def find_matches(possible_endpoints, uri):
 
 
 def get_unique_id_from_url(path: str) -> str:
-    """Return list of path components that were divided by '/'"""
     return path.split("/")[2]
