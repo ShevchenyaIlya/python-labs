@@ -234,9 +234,7 @@ def parse_reddit_page(chrome_drive_path: str, post_count: int, logger: logging.L
         logger.error(exception, exc_info=True)
     finally:
         browser.quit()
-        loop = asyncio.get_event_loop()
-        future = asyncio.ensure_future(start_sending(parsed_information))
-        loop.run_until_complete(future)
+        asyncio.run(start_sending(parsed_information))
 
 
 async def send_data(url, session, post):
