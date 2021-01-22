@@ -168,6 +168,7 @@ def navigate_popup_menu(browser, post_id, current_post_info, logger):
         popup_element = WebDriverWait(browser, 5).until(
             expected_conditions.presence_of_element_located((By.ID, f"UserInfoTooltip--{post_id}-hover-id"))
         )
+        parse_popup_menu(current_post_info, popup_element)
     except (TimeoutException, StaleElementReferenceException):
         logger.debug(f"Popup menu does not appear for this post(url: {current_post_info['post_url']}).")
         return None
@@ -216,8 +217,6 @@ def parse_reddit_page(chrome_drive_path: str, post_count: int, logger: logging.L
                 total_posts_count += 1
                 continue
 
-            parse_popup_menu(current_post_info, popup_element)
-
             total_posts_count += 1
             user_profile_info = get_user_html_from_new_browser_tab(browser, user_page_url, xpath_templates)
             if parse_user_page(user_profile_info, user_page_url, current_post_info, logger, xpath_templates):
@@ -234,7 +233,10 @@ def parse_reddit_page(chrome_drive_path: str, post_count: int, logger: logging.L
         logger.error(exception, exc_info=True)
     finally:
         browser.quit()
-        asyncio.run(start_sending(parsed_information))
+        try:
+            asyncio.run(start_sending(parsed_information))
+        except aiohttp.ClientOSError:
+            pass
 
 
 async def send_data(url, session, post):
@@ -258,10 +260,10 @@ def parse_command_line_arguments() -> Tuple[str, str, int]:
     argument_parser = argparse.ArgumentParser(description="Reddit parser")
     argument_parser.add_argument("--path", metavar="path", type=str, help="Chromedriver path",
                                  default=find_chrome_driver())
-    argument_parser.add_argument("--log_level", metavar="log_level", type=str, default="CRITICAL",
+    argument_parser.add_argument("--log_level", metavar="log_level", type=str, default="DEBUG",
                                  choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                                  help="Minimal logging level('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
-    argument_parser.add_argument("--post_count", metavar="post_count", type=int, default=20,
+    argument_parser.add_argument("--post_count", metavar="post_count", type=int, default=50,
                                  choices=range(0, 101), help="Parsed post count")
     args = argument_parser.parse_args()
 
